@@ -1,0 +1,313 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum Role {
+  USER
+  HOST
+  ADMIN
+}
+
+enum TransactionType {
+  RECHARGE
+  CHAT_PAYMENT
+  REFERRAL_REWARD
+  DAILY_BONUS
+  PROMO
+  COIN_TO_DIAMOND
+  DIAMOND_TO_COIN
+  WITHDRAWAL
+}
+
+enum WithdrawalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REVERSED
+}
+
+enum FraudFlagType {
+  MULTI_ACCOUNT
+  SELF_CHAT
+  RATE_ABUSE
+  DEVICE_ANOMALY
+  SUSPICIOUS_PATTERN
+}
+
+// ============================================
+// USER
+// ============================================
+
+model User {
+  id                String    @id @default(uuid()) @db.Uuid
+  phone             String    @unique
+  username          String?   @unique
+  role              Role      @default(USER)
+  vipLevel          Int       @default(0)
+  vipExpiry         DateTime?
+  country           String?
+  isVerified        Boolean   @default(false)
+  deviceFingerprint String?
+  lastLoginIp       String?
+  isActive          Boolean   @default(true)
+  deletedAt         DateTime? // Soft delete
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  wallet           Wallet?
+  otps             Otp[]
+  sentMessages     Message[]      @relation("SenderMessages")
+  chatsAsUser1     Chat[]         @relation("ChatUser1")
+  chatsAsUser2     Chat[]         @relation("ChatUser2")
+  sentTransactions Transaction[]  @relation("SenderTransactions")
+  recvTransactions Transaction[]  @relation("ReceiverTransactions")
+  referralsMade    Referral[]     @relation("ReferrerRelation")
+  referralsReceived Referral[]    @relation("ReferredRelation")
+  fraudFlags       FraudFlag[]
+  chatSessions     ChatSession[]
+  followers        Follow[]       @relation("FollowerRelation")
+  following        Follow[]       @relation("FolloweeRelation")
+  withdrawals      WithdrawalRequest[]
+
+  @@index([phone])
+  @@index([deviceFingerprint])
+  @@index([createdAt])
+  @@map("users")
+}
+
+// ============================================
+// OTP
+// ============================================
+
+model Otp {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @db.Uuid
+  phone     String
+  code      String
+  expiresAt DateTime
+  verified  Boolean  @default(false)
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([phone, code])
+  @@index([expiresAt])
+  @@map("otps")
+}
+
+// ============================================
+// WALLET (Immutable ledger pattern)
+// ============================================
+
+model Wallet {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @unique @db.Uuid
+  giftCoins     Int      @default(0)
+  gameCoins     Int      @default(0)
+  diamonds      Int      @default(0)
+  promoDiamonds Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("wallets")
+}
+
+model Transaction {
+  id              String            @id @default(uuid()) @db.Uuid
+  idempotencyKey  String?           @unique
+  type            TransactionType
+  senderId        String?           @db.Uuid
+  receiverId      String?           @db.Uuid
+  coinAmount      Int               @default(0)
+  diamondAmount   Int               @default(0)
+  status          TransactionStatus @default(PENDING)
+  metadata        Json?
+  description     String?
+  createdAt       DateTime          @default(now())
+
+  sender   User? @relation("SenderTransactions", fields: [senderId], references: [id])
+  receiver User? @relation("ReceiverTransactions", fields: [receiverId], references: [id])
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("transactions")
+}
+
+// ============================================
+// CHAT
+// ============================================
+
+model Chat {
+  id        String   @id @default(uuid()) @db.Uuid
+  user1Id   String   @db.Uuid
+  user2Id   String   @db.Uuid
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user1    User      @relation("ChatUser1", fields: [user1Id], references: [id])
+  user2    User      @relation("ChatUser2", fields: [user2Id], references: [id])
+  messages Message[]
+
+  @@unique([user1Id, user2Id])
+  @@index([user1Id])
+  @@index([user2Id])
+  @@index([createdAt])
+  @@map("chats")
+}
+
+model Message {
+  id               String   @id @default(uuid()) @db.Uuid
+  chatId           String   @db.Uuid
+  senderId         String   @db.Uuid
+  content          String
+  coinCost         Int      @default(0)
+  diamondGenerated Int      @default(0)
+  createdAt        DateTime @default(now())
+
+  chat   Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender User @relation("SenderMessages", fields: [senderId], references: [id])
+
+  @@index([chatId])
+  @@index([senderId])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+model ChatSession {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  chatId    String   @db.Uuid
+  socketId  String
+  isActive  Boolean  @default(true)
+  joinedAt  DateTime @default(now())
+  leftAt    DateTime?
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([chatId])
+  @@index([socketId])
+  @@map("chat_sessions")
+}
+
+// ============================================
+// REFERRAL
+// ============================================
+
+model Referral {
+  id              String   @id @default(uuid()) @db.Uuid
+  referrerId      String   @db.Uuid
+  referredId      String   @unique @db.Uuid
+  registrationRewardGiven Boolean @default(false)
+  firstChatRewardGiven    Boolean @default(false)
+  createdAt       DateTime @default(now())
+
+  referrer User @relation("ReferrerRelation", fields: [referrerId], references: [id])
+  referred User @relation("ReferredRelation", fields: [referredId], references: [id])
+
+  @@index([referrerId])
+  @@index([referredId])
+  @@map("referrals")
+}
+
+// ============================================
+// FRAUD DETECTION
+// ============================================
+
+model FraudFlag {
+  id               String        @id @default(uuid()) @db.Uuid
+  userId           String        @db.Uuid
+  type             FraudFlagType
+  description      String
+  metadata         Json?
+  ipAddress        String?
+  deviceFingerprint String?
+  resolved         Boolean       @default(false)
+  createdAt        DateTime      @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("fraud_flags")
+}
+
+// ============================================
+// FOLLOW (enables free chat for followers)
+// ============================================
+
+model Follow {
+  id         String   @id @default(uuid()) @db.Uuid
+  followerId String   @db.Uuid
+  followeeId String   @db.Uuid
+  createdAt  DateTime @default(now())
+
+  follower User @relation("FollowerRelation", fields: [followerId], references: [id])
+  followee User @relation("FolloweeRelation", fields: [followeeId], references: [id])
+
+  @@unique([followerId, followeeId])
+  @@index([followerId])
+  @@index([followeeId])
+  @@map("follows")
+}
+
+// ============================================
+// WITHDRAWAL REQUESTS
+// ============================================
+
+model WithdrawalRequest {
+  id            String           @id @default(uuid()) @db.Uuid
+  userId        String           @db.Uuid
+  diamondAmount Int
+  status        WithdrawalStatus @default(PENDING)
+  adminNote     String?
+  processedAt   DateTime?
+  processedBy   String?          @db.Uuid
+  createdAt     DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("withdrawal_requests")
+}
+
+// ============================================
+// SYSTEM SETTINGS (owner-controlled config)
+// ============================================
+
+model SystemSettings {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       String   @unique
+  value     String
+  updatedBy String?  @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("system_settings")
+}
