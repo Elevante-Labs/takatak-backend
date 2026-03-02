@@ -5,7 +5,7 @@ import { APP_GUARD, APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import configuration from './config/configuration';
 import { validateEnv } from './config/validation.schema';
 import { DatabaseModule } from './database/database.module';
-import { RedisService } from './database/redis.service';
+import { RedisModule } from './database/redis.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { WalletModule } from './modules/wallet/wallet.module';
@@ -37,6 +37,7 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
       },
     ]),
     DatabaseModule,
+    RedisModule,
     AuthModule,
     UsersModule,
     WalletModule,
@@ -51,7 +52,6 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
     HealthModule,
   ],
   providers: [
-    RedisService,
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
@@ -69,6 +69,5 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
       useClass: LoggingInterceptor,
     },
   ],
-  exports: [RedisService],
 })
 export class AppModule {}

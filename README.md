@@ -186,7 +186,8 @@ const socket = io('http://localhost:3000/chat', {
 
 // Events
 socket.emit('joinChat', { chatId: '...' });
-socket.emit('sendMessage', { chatId: '...', content: '...' });
+socket.emit('sendMessage', { chatId: '...', content: '...', idempotencyKey: '<unique-key>' });
+// server will respond with 'messageAck' (or 'messageError' on failure)
 socket.emit('typing', { chatId: '...' });
 socket.on('newMessage', (message) => { /* ... */ });
 socket.on('userTyping', (data) => { /* ... */ });

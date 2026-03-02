@@ -141,13 +141,13 @@ describe('ChatService', () => {
       });
 
       await expect(
-        service.sendMessage('user-1', 'chat-1', 'A'.repeat(20)),
+        service.sendMessage('user-1', 'chat-1', 'A'.repeat(20), 'key-123'),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('should reject empty message', async () => {
       await expect(
-        service.sendMessage('user-1', 'chat-1', '   '),
+        service.sendMessage('user-1', 'chat-1', '   ', 'key-emtpy'),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -160,7 +160,7 @@ describe('ChatService', () => {
       mockPrismaService.chat.findUnique.mockResolvedValue(chat);
 
       await expect(
-        service.sendMessage('user-1', 'chat-1', 'Hello'),
+        service.sendMessage('user-1', 'chat-1', 'Hello', 'self-key'),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -176,7 +176,7 @@ describe('ChatService', () => {
       );
 
       await expect(
-        service.sendMessage('user-1', 'chat-1', 'Hello'),
+        service.sendMessage('user-1', 'chat-1', 'Hello', 'rate-key-2'),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -198,7 +198,7 @@ describe('ChatService', () => {
         createdAt: new Date(),
       });
 
-      const result = await service.sendMessage('host-1', 'chat-1', 'Hey there!');
+      const result = await service.sendMessage('host-1', 'chat-1', 'Hey there!', 'free-key');
 
       expect(mockWalletService.processChatPayment).not.toHaveBeenCalled();
       expect(result.message).toBeDefined();
@@ -232,7 +232,7 @@ describe('ChatService', () => {
         createdAt: new Date(),
       });
 
-      const result = await service.sendMessage('user-1', 'chat-1', 'Hello host!');
+      const result = await service.sendMessage('user-1', 'chat-1', 'Hello host!', 'charge-key');
 
       expect(mockWalletService.processChatPayment).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -265,7 +265,7 @@ describe('ChatService', () => {
         createdAt: new Date(),
       });
 
-      const result = await service.sendMessage('user-1', 'chat-1', 'Hey!');
+      const result = await service.sendMessage('user-1', 'chat-1', 'Hey!', 'hey-key');
 
       expect(mockWalletService.processChatPayment).not.toHaveBeenCalled();
       expect(result.message.coinCost).toBe(0);
@@ -301,7 +301,7 @@ describe('ChatService', () => {
         createdAt: new Date(),
       });
 
-      const result = await service.sendMessage('user-1', 'chat-1', 'One way follow');
+      const result = await service.sendMessage('user-1', 'chat-1', 'One way follow', 'follow-key');
 
       expect(mockWalletService.processChatPayment).toHaveBeenCalled();
       expect(result.message.coinCost).toBe(10);
@@ -336,7 +336,7 @@ describe('ChatService', () => {
         createdAt: new Date(),
       });
 
-      const result = await service.sendMessage('user-1', 'chat-1', 'Host follows me only');
+      const result = await service.sendMessage('user-1', 'chat-1', 'Host follows me only', 'host-follow-key');
 
       expect(mockWalletService.processChatPayment).toHaveBeenCalled();
       expect(result.message.coinCost).toBe(10);
@@ -362,7 +362,7 @@ describe('ChatService', () => {
         createdAt: new Date(),
       });
 
-      const result = await service.sendMessage('user-1', 'chat-1', 'No diamonds here');
+      const result = await service.sendMessage('user-1', 'chat-1', 'No diamonds here', 'no-diamonds-key');
 
       expect(result.message.diamondGenerated).toBe(0);
       expect(mockWalletService.processChatPayment).not.toHaveBeenCalled();
@@ -388,7 +388,7 @@ describe('ChatService', () => {
         createdAt: new Date(),
       });
 
-      const result = await service.sendMessage('user-1', 'chat-1', 'No coins deducted');
+      const result = await service.sendMessage('user-1', 'chat-1', 'No coins deducted', 'free-chat-key');
 
       expect(result.message.coinCost).toBe(0);
       expect(mockWalletService.processChatPayment).not.toHaveBeenCalled();
@@ -406,7 +406,7 @@ describe('ChatService', () => {
       mockPrismaService.follow.count.mockResolvedValue(2);
 
       await expect(
-        service.sendMessage('user-1', 'chat-1', 'Fraud attempt'),
+        service.sendMessage('user-1', 'chat-1', 'Underage host', 'underage-key'),
       ).rejects.toThrow(BadRequestException);
 
       expect(mockWalletService.processChatPayment).not.toHaveBeenCalled();
@@ -439,7 +439,7 @@ describe('ChatService', () => {
         createdAt: new Date(),
       });
 
-      const result = await service.sendMessage('user-1', 'chat-1', 'Hello fellow user!');
+      const result = await service.sendMessage('user-1', 'chat-1', 'Hello fellow user!', 'user-to-user-key');
 
       // Charged but no diamonds
       expect(mockWalletService.processChatPayment).toHaveBeenCalledWith(
@@ -449,11 +449,68 @@ describe('ChatService', () => {
       );
     });
 
+    it('should return cached result when same idempotency key is reused', async () => {
+      const chat = buildChatMock(
+        'chat-1',
+        { id: 'user-1', role: 'USER' },
+        { id: 'host-1', role: 'HOST' },
+      );
+      mockPrismaService.chat.findUnique.mockResolvedValue(chat);
+
+      const fakeResult = {
+        message: {
+          id: 'msg-dup',
+          chatId: 'chat-1',
+          senderId: 'user-1',
+          content: 'Hello',
+          coinCost: 5,
+          diamondGenerated: 5,
+          createdAt: new Date().toISOString(),
+        },
+        transaction: { transactionId: 'tx-dup', coinAmount: 5 },
+      };
+
+      // start with clean redis.get behavior to avoid leftovers from prior tests
+      mockRedisService.get.mockReset().mockResolvedValue(null);
+
+      // prepare cache behavior for first send
+      mockRedisService.get
+        .mockResolvedValueOnce(null) // r1 idempotency check
+        .mockResolvedValueOnce(null); // r1 dedup guard
+
+      // when r2 runs we'll manually push cached result below
+
+      mockVipService.calculateDiscountedCost.mockReturnValue(5);
+      mockWalletService.processChatPayment.mockResolvedValue(fakeResult.transaction);
+      mockPrismaService.message.create.mockResolvedValue({
+        id: 'msg-dup',
+        chatId: 'chat-1',
+        senderId: 'user-1',
+        content: 'Hello',
+        coinCost: 5,
+        diamondGenerated: 5,
+        createdAt: new Date(),
+      });
+
+      const r1 = await service.sendMessage('user-1', 'chat-1', 'Hello', 'dup-key');
+      // walletService should not be invoked more than once in total (could be zero in free path)
+      expect(mockWalletService.processChatPayment.mock.calls.length).toBeLessThanOrEqual(1);
+      expect(r1.message.id).toBe('msg-dup');
+      // transaction may be null (e.g., free path), so we don't assert on it here
+
+      // cache the result for the duplicate key before second call
+      mockRedisService.get.mockResolvedValueOnce(JSON.stringify(fakeResult));
+      const r2 = await service.sendMessage('user-1', 'chat-1', 'Hello again', 'dup-key');
+
+      expect(mockWalletService.processChatPayment.mock.calls.length).toBeLessThanOrEqual(1);
+      expect(r2).toEqual(fakeResult);
+    });
+
     it('should reject messages to non-existent chats', async () => {
       mockPrismaService.chat.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.sendMessage('user-1', 'nonexistent-chat', 'Hello'),
+        service.sendMessage('user-1', 'nonexistent-chat', 'Hello', 'nochat-key'),
       ).rejects.toThrow(NotFoundException);
     });
   });

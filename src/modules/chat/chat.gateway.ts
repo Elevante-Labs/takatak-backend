@@ -56,6 +56,12 @@ export class ChatGateway
     // This replaces manual psubscribe — the adapter transparently
     // broadcasts all socket.io events across instances via Redis.
     const pubClient = this.redis.getClient();
+    
+    if (!pubClient) {
+      this.logger.warn('Redis client not available; running in single-instance mode');
+      return;
+    }
+    
     const subClient = pubClient.duplicate();
 
     subClient.on('error', (err) => {
@@ -68,10 +74,14 @@ export class ChatGateway
 
   async handleConnection(client: AuthenticatedSocket) {
     try {
-      const token =
-        client.handshake?.auth?.token ||
-        client.handshake?.headers?.authorization?.split(' ')[1];
+      console.log('WS CLIENT CONNECTED TO /chat:', client.id)
+      let token =
+  client.handshake?.auth?.token ||
+  client.handshake?.headers?.authorization;
 
+if (token?.startsWith('Bearer ')) {
+  token = token.split(' ')[1];
+}
       if (!token) {
         this.logger.warn(`Connection rejected: No token provided`);
         client.disconnect();
@@ -87,6 +97,8 @@ export class ChatGateway
       // Track user's socket connection
       await this.redis.set(`socket:${payload.sub}`, client.id, 3600);
 
+      // DEBUG: Log socket connection
+      console.log(`[SOCKET] ${payload.sub} connected on /chat namespace (id: ${client.id})`);
       this.logger.log(`Client connected: ${payload.sub} (${client.id})`);
     } catch (err) {
       this.logger.warn(`Connection rejected: Invalid token - ${(err as Error).message}`);
@@ -122,7 +134,15 @@ export class ChatGateway
 
       client.join(`chat:${chatId}`);
 
-      this.logger.log(`User ${client.user.sub} joined chat ${chatId}`);
+      this.logger.log(
+        `[WS] ${client.user.sub} joined room chat:${chatId} (socket ${client.id})`
+      );
+
+      this.logger.log(
+        `[WS] Rooms for socket ${client.id}: ${JSON.stringify(
+          Array.from(client.rooms),
+        )}`
+      );
 
       return { event: 'joinedChat', data: { chatId } };
     } catch (err) {
@@ -154,8 +174,13 @@ export class ChatGateway
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: SendMessageDto,
   ) {
+    this.logger.log(
+      `[WS] sendMessage received from ${client.user?.sub} for chat ${data.chatId}`
+    );
+
     if (!client.user) {
-      throw new WsException('Not authenticated');
+      client.emit('messageError', { error: 'Not authenticated' });
+      return;
     }
 
     try {
@@ -163,16 +188,28 @@ export class ChatGateway
         client.user.sub,
         data.chatId,
         data.content,
+        data.idempotencyKey,
       );
 
-      // With @socket.io/redis-adapter, server.to().emit() is
-      // automatically broadcast to all instances. No manual
-      // Redis publish needed — the adapter handles it.
+      this.logger.log(
+        `[WS] Broadcasting newMessage to room chat:${data.chatId}`
+      );
+
       this.server
         .to(`chat:${data.chatId}`)
         .emit('newMessage', result.message);
 
-      // Send transaction confirmation to sender
+      this.logger.log(
+        `[WS] Emitting messageAck to sender ${client.id} for key ${data.idempotencyKey}`
+      );
+
+      client.emit('messageAck', {
+        chatId: data.chatId,
+        idempotencyKey: data.idempotencyKey,
+        messageId: result.message.id,
+        createdAt: result.message.createdAt,
+      });
+
       if (result.transaction) {
         client.emit('paymentConfirmed', {
           transactionId: result.transaction.transactionId,
@@ -180,12 +217,15 @@ export class ChatGateway
         });
       }
 
-      return { event: 'messageSent', data: result.message };
     } catch (err) {
       this.logger.error(
-        `Message send failed for user ${client.user.sub}: ${(err as Error).message}`,
+        `[WS] sendMessage failed: ${(err as Error).message}`
       );
-      throw new WsException((err as Error).message);
+
+      client.emit('messageError', {
+        idempotencyKey: data.idempotencyKey,
+        error: (err as Error).message,
+      });
     }
   }
 
