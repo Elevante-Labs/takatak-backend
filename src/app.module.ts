@@ -15,6 +15,7 @@ import { VipModule } from './modules/vip/vip.module';
 import { FraudModule } from './modules/fraud/fraud.module';
 import { WithdrawalModule } from './modules/withdrawal/withdrawal.module';
 import { HostModule } from './modules/host/host.module';
+import { AgencyModule } from './modules/agency/agency.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { FollowModule } from './modules/follow/follow.module';
 import { HealthModule } from './modules/health/health.module';
@@ -46,6 +47,7 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
     FraudModule,
     WithdrawalModule,
     HostModule,
+    AgencyModule,
     AdminModule,
     FollowModule,
     HealthModule,

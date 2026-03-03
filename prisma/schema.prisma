@@ -14,6 +14,7 @@ datasource db {
 enum Role {
   USER
   HOST
+  AGENCY
   ADMIN
 }
 
@@ -26,6 +27,12 @@ enum TransactionType {
   COIN_TO_DIAMOND
   DIAMOND_TO_COIN
   WITHDRAWAL
+  AGENCY_COMMISSION
+  HOST_SALARY_BONUS
+  HOST_LIVE_BONUS
+  HOST_NEW_REWARD
+  HOST_ORDINARY_REWARD
+  HOST_SUPERSTAR_SALARY
 }
 
 enum WithdrawalStatus {
@@ -84,6 +91,8 @@ model User {
   followers        Follow[]       @relation("FollowerRelation")
   following        Follow[]       @relation("FolloweeRelation")
   withdrawals      WithdrawalRequest[]
+  agency           Agency?        @relation("AgencyOwner")
+  hostProfile      HostProfile?
 
   @@index([phone])
   @@index([deviceFingerprint])
@@ -295,6 +304,198 @@ model WithdrawalRequest {
   @@index([status])
   @@index([createdAt])
   @@map("withdrawal_requests")
+}
+
+// ============================================
+// AGENCY
+// ============================================
+
+enum AgencyLevel {
+  D
+  C
+  B
+  A
+  S
+}
+
+enum HostLevel {
+  NONE
+  F
+  E
+  D
+  C
+  B
+  A
+  S
+  SS
+}
+
+enum SuperstarTag {
+  TALENT
+  H
+  G
+  F
+  E
+  D
+  C
+  B
+  A
+  S
+  SS
+}
+
+model Agency {
+  id              String      @id @default(uuid()) @db.Uuid
+  ownerId         String      @unique @db.Uuid
+  parentAgencyId  String?     @db.Uuid
+  name            String
+  level           AgencyLevel @default(D)
+  isBanned        Boolean     @default(false)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  owner           User        @relation("AgencyOwner", fields: [ownerId], references: [id])
+  parentAgency    Agency?     @relation("SubAgencies", fields: [parentAgencyId], references: [id])
+  subAgencies     Agency[]    @relation("SubAgencies")
+  hosts           HostProfile[]
+  commissionLogs  AgencyCommissionLog[]
+
+  @@index([ownerId])
+  @@index([parentAgencyId])
+  @@index([level])
+  @@map("agencies")
+}
+
+model AgencyCommissionLog {
+  id              String   @id @default(uuid()) @db.Uuid
+  agencyId        String   @db.Uuid
+  sourceAgencyId  String?  @db.Uuid    // null = own host, set = from sub-agency
+  hostId          String?  @db.Uuid
+  giftDiamonds    Int      @default(0) // gift amount that triggered this commission
+  commissionRate  Float                // agency's own rate at the time
+  subAgencyRate   Float    @default(0) // sub-agency's rate (0 if own host)
+  effectiveRate   Float                // commissionRate - subAgencyRate
+  diamondsEarned  Int      @default(0) // actual commission diamonds credited
+  createdAt       DateTime @default(now())
+
+  agency Agency @relation(fields: [agencyId], references: [id])
+
+  @@index([agencyId])
+  @@index([sourceAgencyId])
+  @@index([createdAt])
+  @@map("agency_commission_logs")
+}
+
+// ============================================
+// HOST PROFILE & REWARDS
+// ============================================
+
+model HostProfile {
+  id                String     @id @default(uuid()) @db.Uuid
+  userId            String     @unique @db.Uuid
+  agencyId          String?    @db.Uuid
+  hostLevel         HostLevel  @default(NONE)
+  gender            String?    // 'M' or 'F'
+  isSuperstar       Boolean    @default(false)
+  superstarTag      SuperstarTag?
+  registeredAsHostAt DateTime  @default(now())
+  isBanned          Boolean    @default(false)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  user              User       @relation(fields: [userId], references: [id])
+  agency            Agency?    @relation(fields: [agencyId], references: [id])
+  dailyStats        HostDailyStat[]
+  weeklyStats       HostWeeklyStat[]
+  superstarRecords  SuperstarRecord[]
+  rewardClaims      HostRewardClaim[]
+
+  @@index([userId])
+  @@index([agencyId])
+  @@index([hostLevel])
+  @@map("host_profiles")
+}
+
+model HostDailyStat {
+  id              String   @id @default(uuid()) @db.Uuid
+  hostProfileId   String   @db.Uuid
+  date            DateTime @db.Date
+  diamondsReceived Int     @default(0) // from gifts (Live, Party, Chat) - excludes platform rewards
+  liveMinutes     Int      @default(0) // accumulated live minutes
+  bonusClaimed    Boolean  @default(false)
+  bonusDiamonds   Int      @default(0)
+  salaryClaimed   Boolean  @default(false)
+  salaryDiamonds  Int      @default(0)
+  newHostRewardClaimed Boolean @default(false)
+  newHostRewardDiamonds Int @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  hostProfile HostProfile @relation(fields: [hostProfileId], references: [id])
+
+  @@unique([hostProfileId, date])
+  @@index([hostProfileId])
+  @@index([date])
+  @@map("host_daily_stats")
+}
+
+model HostWeeklyStat {
+  id               String   @id @default(uuid()) @db.Uuid
+  hostProfileId    String   @db.Uuid
+  weekStart        DateTime @db.Date  // Monday of the week
+  diamondsReceived Int      @default(0)
+  totalLiveMinutes Int      @default(0)
+  bonusClaimed     Boolean  @default(false)
+  bonusDiamonds    Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  hostProfile HostProfile @relation(fields: [hostProfileId], references: [id])
+
+  @@unique([hostProfileId, weekStart])
+  @@index([hostProfileId])
+  @@index([weekStart])
+  @@map("host_weekly_stats")
+}
+
+model SuperstarRecord {
+  id              String       @id @default(uuid()) @db.Uuid
+  hostProfileId   String       @db.Uuid
+  tag             SuperstarTag
+  month           DateTime     @db.Date  // 1st of the month
+  timeTargetHours Int          @default(30)
+  diamondTarget   Int
+  totalLiveHours  Float        @default(0)
+  totalDiamonds   Int          @default(0)
+  targetMet       Boolean      @default(false)
+  fixedSalaryPaid Boolean      @default(false)
+  extraBonusUsd   Float        @default(0)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  hostProfile HostProfile @relation(fields: [hostProfileId], references: [id])
+
+  @@unique([hostProfileId, month])
+  @@index([hostProfileId])
+  @@index([month])
+  @@map("superstar_records")
+}
+
+model HostRewardClaim {
+  id              String   @id @default(uuid()) @db.Uuid
+  hostProfileId   String   @db.Uuid
+  rewardType      String   // 'DAILY_SALARY', 'LIVE_BONUS', 'NEW_HOST', 'ORDINARY', 'WEEKLY_BONUS', 'SUPERSTAR'
+  diamondsAwarded Int      @default(0)
+  date            DateTime @db.Date
+  metadata        Json?
+  createdAt       DateTime @default(now())
+
+  hostProfile HostProfile @relation(fields: [hostProfileId], references: [id])
+
+  @@index([hostProfileId])
+  @@index([rewardType])
+  @@index([date])
+  @@map("host_reward_claims")
 }
 
 // ============================================

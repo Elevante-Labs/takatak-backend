@@ -4,6 +4,7 @@ import {
   NotFoundException,
   Logger,
   InternalServerErrorException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service';
@@ -18,6 +19,7 @@ import {
   getPaginationParams,
   buildPaginatedResult,
 } from '../../common/utils/pagination.util';
+import { GiftProcessorService } from './gift-processor.service';
 
 @Injectable()
 export class WalletService {
@@ -26,6 +28,7 @@ export class WalletService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    @Optional() private readonly giftProcessor?: GiftProcessorService,
   ) {}
 
   // ──────────────────────────────────────────
@@ -238,7 +241,7 @@ export class WalletService {
     }
 
     try {
-      return await this.prisma.$transaction(
+      const result = await this.prisma.$transaction(
         async (tx) => {
           // CRITICAL: Acquire exclusive row lock via raw SQL.
           // Prisma's findUnique does NOT issue SELECT FOR UPDATE,
@@ -359,6 +362,18 @@ export class WalletService {
           timeout: 10000,
         },
       );
+
+      // After successful transaction: trigger agency commission + host stat recording
+      // These are fire-and-forget and do NOT affect the payment result
+      if (this.giftProcessor && !usePromoDiamonds) {
+        this.giftProcessor
+          .processGiftSideEffects(receiverId, diamondGenerated)
+          .catch((err) => {
+            this.logger.error(`Gift side effects failed: ${(err as Error).message}`);
+          });
+      }
+
+      return result;
     } catch (error) {
       await this.logFailedTransaction(TransactionType.CHAT_PAYMENT, (error as Error).message, {
         idempotencyKey,
