@@ -142,7 +142,22 @@ export class ChatService {
    * 5. Mutual-follow-free: USER and HOST mutually follow each other = free, no diamonds
    * 6. Referral pair detection routes diamonds to promoDiamonds
    */
-  async sendMessage(senderId: string, chatId: string, content: string) {
+  async sendMessage(
+    senderId: string,
+    chatId: string,
+    content: string,
+    idempotencyKey?: string,
+  ) {
+    // ── early idempotency lookup ──
+    if (idempotencyKey) {
+      const cacheKey = `chat-msg:${senderId}:${chatId}:${idempotencyKey}`;
+      const cached = await this.redis.get(cacheKey);
+      if (cached) {
+        // already processed; return parsed result so caller can behave identically
+        return JSON.parse(cached);
+      }
+    }
+
     // ── 1. Content validation & sanitization ──
     const sanitized = this.sanitizeContent(content);
     const maxLength = await this.getMaxMessageLength();
@@ -216,7 +231,7 @@ export class ChatService {
 
     // HOST → anyone = free, no charge, no diamonds
     if (senderIsHost) {
-      return this.persistAndPublish(chatId, senderId, sanitized, 0, 0, null);
+      return this.persistAndPublish(chatId, senderId, sanitized, 0, 0, null, idempotencyKey);
     }
 
     // USER → HOST: check if mutual-follow-makes-free
@@ -226,7 +241,7 @@ export class ChatService {
         this.logger.log(
           `Mutual-follow-free: ${sender.id} <-> HOST ${receiver.id}, message is free`,
         );
-        return this.persistAndPublish(chatId, senderId, sanitized, 0, 0, null);
+        return this.persistAndPublish(chatId, senderId, sanitized, 0, 0, null, idempotencyKey);
       }
     }
 
@@ -271,7 +286,10 @@ export class ChatService {
     }
 
     // ── 7. Process payment atomically ──
-    const paymentIdempotencyKey = `chat-pay:${senderId}:${chatId}:${Date.now()}`;
+    // use the passed idempotency key if available; prefix to avoid collisions
+    const paymentIdempotencyKey = idempotencyKey
+      ? `chat-pay:${senderId}:${chatId}:${idempotencyKey}`
+      : `chat-pay:${senderId}:${chatId}:${Date.now()}`;
 
     const transactionResult = await this.walletService.processChatPayment({
       senderId: sender.id,
@@ -289,6 +307,7 @@ export class ChatService {
       coinCost,
       diamondGenerated,
       transactionResult,
+      idempotencyKey,
     );
   }
 
@@ -303,8 +322,9 @@ export class ChatService {
     coinCost: number,
     diamondGenerated: number,
     transactionResult: any,
+    idempotencyKey?: string,
   ) {
-    // Dedup guard
+    // Dedup guard for very quick repeats (same ms)
     const dedupKey = `msg:${senderId}:${chatId}:${Date.now()}`;
     const isDuplicate = await this.redis.get(dedupKey);
     if (isDuplicate) {
@@ -332,6 +352,19 @@ export class ChatService {
       createdAt: message.createdAt.toISOString(),
     };
 
+    const result = {
+      message: messagePayload,
+      transaction: transactionResult,
+    };
+
+    // if an idempotency key was provided, cache the final result so that
+    // repeated requests return the same payload and avoid double-processing
+    if (idempotencyKey) {
+      const cacheKey = `chat-msg:${senderId}:${chatId}:${idempotencyKey}`;
+      // keep for 1 day (arbitrary); adjust to business needs
+      await this.redis.set(cacheKey, JSON.stringify(result), 86400);
+    }
+
     // NOTE: No Redis publish here. The gateway uses @socket.io/redis-adapter
     // which automatically broadcasts server.to().emit() across instances.
 
@@ -340,11 +373,9 @@ export class ChatService {
         (coinCost > 0 ? ` (cost: ${coinCost} coins)` : ' (free)'),
     );
 
-    return {
-      message: messagePayload,
-      transaction: transactionResult,
-    };
+    return result;
   }
+
 
   /**
    * Get chat messages with pagination.
