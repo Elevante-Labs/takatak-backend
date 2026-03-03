@@ -28,6 +28,7 @@ enum TransactionType {
   DIAMOND_TO_COIN
   WITHDRAWAL
   AGENCY_COMMISSION
+  AGENCY_COMMISSION_REVERSAL
   HOST_SALARY_BONUS
   HOST_LIVE_BONUS
   HOST_NEW_REWARD
@@ -345,14 +346,16 @@ enum SuperstarTag {
 }
 
 model Agency {
-  id              String      @id @default(uuid()) @db.Uuid
-  ownerId         String      @unique @db.Uuid
-  parentAgencyId  String?     @db.Uuid
-  name            String
-  level           AgencyLevel @default(D)
-  isBanned        Boolean     @default(false)
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  id                String      @id @default(uuid()) @db.Uuid
+  ownerId           String      @unique @db.Uuid
+  parentAgencyId    String?     @db.Uuid
+  name              String
+  level             AgencyLevel @default(D)
+  rollingDiamonds30d Int        @default(0)
+  lastRollingUpdate DateTime?
+  isBanned          Boolean     @default(false)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
 
   owner           User        @relation("AgencyOwner", fields: [ownerId], references: [id])
   parentAgency    Agency?     @relation("SubAgencies", fields: [parentAgencyId], references: [id])
@@ -367,20 +370,24 @@ model Agency {
 }
 
 model AgencyCommissionLog {
-  id              String   @id @default(uuid()) @db.Uuid
-  agencyId        String   @db.Uuid
-  sourceAgencyId  String?  @db.Uuid    // null = own host, set = from sub-agency
-  hostId          String?  @db.Uuid
-  giftDiamonds    Int      @default(0) // gift amount that triggered this commission
-  commissionRate  Float                // agency's own rate at the time
-  subAgencyRate   Float    @default(0) // sub-agency's rate (0 if own host)
-  effectiveRate   Float                // commissionRate - subAgencyRate
-  diamondsEarned  Int      @default(0) // actual commission diamonds credited
-  createdAt       DateTime @default(now())
+  id                    String   @id @default(uuid()) @db.Uuid
+  agencyId              String   @db.Uuid
+  originalTransactionId String   @db.Uuid    // links to the originating CHAT_PAYMENT Transaction.id
+  sourceAgencyId        String?  @db.Uuid    // null = own host, set = from sub-agency
+  hostId                String?  @db.Uuid
+  giftDiamonds          Int      @default(0) // gift amount that triggered this commission
+  commissionRate        Float                // agency's own rate at the time
+  subAgencyRate         Float    @default(0) // sub-agency's rate (0 if own host)
+  effectiveRate         Float                // commissionRate - subAgencyRate
+  diamondsEarned        Int      @default(0) // actual commission diamonds credited
+  isReversal            Boolean  @default(false)
+  createdAt             DateTime @default(now())
 
   agency Agency @relation(fields: [agencyId], references: [id])
 
+  @@unique([agencyId, originalTransactionId, isReversal])
   @@index([agencyId])
+  @@index([originalTransactionId])
   @@index([sourceAgencyId])
   @@index([createdAt])
   @@map("agency_commission_logs")

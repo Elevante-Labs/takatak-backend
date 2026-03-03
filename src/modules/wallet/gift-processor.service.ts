@@ -1,5 +1,4 @@
-import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
-import { AgencyService } from '../agency/agency.service';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { HostGiftHandlerService } from '../host/host-gift-handler.service';
 
 /**
@@ -8,23 +7,25 @@ import { HostGiftHandlerService } from '../host/host-gift-handler.service';
  * When a host receives diamonds from a gift (chat payment),
  * this service triggers:
  * 1. Host daily/weekly stat recording (for salary tier tracking)
- * 2. Agency commission calculation and crediting
  *
- * These operations are fire-and-forget and should NOT fail the
- * original gift transaction.
+ * NOTE: Agency commission is NO LONGER fire-and-forget.
+ * It is now processed INSIDE the main wallet transaction
+ * for financial safety. See wallet.service.ts processChatPayment.
  */
 @Injectable()
 export class GiftProcessorService {
   private readonly logger = new Logger(GiftProcessorService.name);
 
   constructor(
-    @Optional() private readonly agencyService: AgencyService,
     @Optional() private readonly hostGiftHandler: HostGiftHandlerService,
-  ) {}
+  ) { }
 
   /**
-   * Process all side effects after a host receives a gift.
+   * Process non-financial side effects after a host receives a gift.
    * Called after the main chat payment transaction commits.
+   *
+   * Commission is handled inside the main transaction now.
+   * This only handles host stat recording.
    */
   async processGiftSideEffects(
     hostUserId: string,
@@ -35,15 +36,6 @@ export class GiftProcessorService {
       this.hostGiftHandler.onGiftReceived(hostUserId, giftDiamonds).catch((err) => {
         this.logger.error(
           `Failed host stat recording for ${hostUserId}: ${err.message}`,
-        );
-      });
-    }
-
-    // Fire-and-forget: process agency commission
-    if (this.agencyService) {
-      this.agencyService.processGiftCommission(hostUserId, giftDiamonds).catch((err) => {
-        this.logger.error(
-          `Failed agency commission for ${hostUserId}: ${err.message}`,
         );
       });
     }

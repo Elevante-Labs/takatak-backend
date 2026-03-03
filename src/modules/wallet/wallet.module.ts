@@ -14,4 +14,4 @@ import { HostModule } from '../host/host.module';
   providers: [WalletService, GiftProcessorService],
   exports: [WalletService],
 })
-export class WalletModule {}
+export class WalletModule { }

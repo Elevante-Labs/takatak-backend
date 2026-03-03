@@ -20,6 +20,7 @@ import {
   buildPaginatedResult,
 } from '../../common/utils/pagination.util';
 import { GiftProcessorService } from './gift-processor.service';
+import { AgencyService } from '../agency/agency.service';
 
 @Injectable()
 export class WalletService {
@@ -29,7 +30,8 @@ export class WalletService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     @Optional() private readonly giftProcessor?: GiftProcessorService,
-  ) {}
+    @Optional() private readonly agencyService?: AgencyService,
+  ) { }
 
   // ──────────────────────────────────────────
   // Helpers
@@ -213,7 +215,8 @@ export class WalletService {
 
   /**
    * Process chat payment — the core monetization flow.
-   * Atomic: deducts coins from sender, credits diamonds to receiver.
+   * Atomic: deducts coins from sender, credits diamonds to receiver,
+   * AND processes agency commission inside the same transaction.
    * Rolls back on any failure. Logs FAILED record on error.
    */
   async processChatPayment(params: ChatPaymentParams): Promise<TransactionResult> {
@@ -240,12 +243,13 @@ export class WalletService {
       if (existing) return existing;
     }
 
+    // Track tier changes for post-commit event emission
+    let tierChanges: Array<{ agencyId: string; oldLevel: string; newLevel: string }> = [];
+
     try {
       const result = await this.prisma.$transaction(
         async (tx) => {
           // CRITICAL: Acquire exclusive row lock via raw SQL.
-          // Prisma's findUnique does NOT issue SELECT FOR UPDATE,
-          // so two concurrent transactions can read the same balance.
           const senderWallets = await tx.$queryRaw<
             Array<{
               id: string;
@@ -296,7 +300,7 @@ export class WalletService {
             throw new InternalServerErrorException('Balance calculation error');
           }
 
-          // Deduct from sender
+          // 1. Deduct from sender
           await tx.wallet.update({
             where: { userId: senderId },
             data: {
@@ -305,7 +309,7 @@ export class WalletService {
             },
           });
 
-          // Lock receiver wallet row as well to prevent concurrent credit issues
+          // 2. Lock receiver wallet row
           const receiverWallets = await tx.$queryRaw<
             Array<{ id: string; userId: string }>
           >(
@@ -316,7 +320,7 @@ export class WalletService {
             throw new NotFoundException('Receiver wallet not found');
           }
 
-          // Credit diamonds to receiver — promo diamonds are non-withdrawable
+          // 3. Credit diamonds to receiver
           await tx.wallet.update({
             where: { userId: receiverId },
             data: usePromoDiamonds
@@ -324,7 +328,7 @@ export class WalletService {
               : { diamonds: { increment: diamondGenerated } },
           });
 
-          // Create immutable transaction record
+          // 4. Create immutable transaction record
           const transaction = await tx.transaction.create({
             data: {
               idempotencyKey,
@@ -345,6 +349,18 @@ export class WalletService {
             },
           });
 
+          // 5. Process agency commission INSIDE the same transaction
+          //    This ensures atomicity: if commission fails, entire payment rolls back.
+          if (this.agencyService && !usePromoDiamonds && diamondGenerated > 0) {
+            const commissionResult = await this.agencyService.processGiftCommission(
+              receiverId,
+              diamondGenerated,
+              transaction.id,
+              tx,
+            );
+            tierChanges = commissionResult.tierChanges;
+          }
+
           this.logger.log(
             `Chat payment: ${coinCost} coins from ${senderId} → ${diamondGenerated} diamonds to ${receiverId} (tx: ${transaction.id})`,
           );
@@ -359,12 +375,26 @@ export class WalletService {
         {
           isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
           maxWait: 5000,
-          timeout: 10000,
+          timeout: 15000, // Extended: commission runs inside now
         },
       );
 
-      // After successful transaction: trigger agency commission + host stat recording
-      // These are fire-and-forget and do NOT affect the payment result
+      // ── Post-commit actions (fire-and-forget) ──
+
+      // Emit tier change events AFTER commit (edge case C)
+      if (this.agencyService && tierChanges.length > 0) {
+        this.agencyService.emitTierChanges(tierChanges);
+      }
+
+      // Emit commission earned event
+      if (this.agencyService && !usePromoDiamonds && diamondGenerated > 0) {
+        this.agencyService.emitEvent('agencyCommissionEarned', receiverId, {
+          transactionId: result.transactionId,
+          diamondGenerated,
+        });
+      }
+
+      // Host stat recording remains fire-and-forget (not financial)
       if (this.giftProcessor && !usePromoDiamonds) {
         this.giftProcessor
           .processGiftSideEffects(receiverId, diamondGenerated)
