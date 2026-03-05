@@ -29,7 +29,7 @@ export class FraudService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly configService: ConfigService,
-  ) {}
+  ) { }
 
   /**
    * Check message rate limit for a user.
@@ -41,6 +41,8 @@ export class FraudService {
    * Now uses a Lua script for atomic INCR + EXPIRE-if-new.
    */
   async checkMessageRateLimit(userId: string): Promise<void> {
+    if (!this.redis.isAvailable) return;
+
     const maxPerMinute = this.configService.get<number>('fraud.maxMessagesPerMinute') || 30;
     const key = `rate:msg:${userId}`;
 

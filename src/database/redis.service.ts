@@ -9,7 +9,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   private subscriber!: Redis;
   private _isConnected = false;
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly configService: ConfigService) { }
 
   /** Whether the Redis client is connected and usable. */
   get isAvailable(): boolean {
@@ -31,6 +31,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       host,
       port,
       password: this.configService.get<string>('redis.password') || undefined,
+      enableOfflineQueue: false, // Prevents ioredis from hanging commands infinitely when disconnected
       maxRetriesPerRequest: 3,
       retryStrategy: (times: number) => {
         if (times > 3) {
@@ -71,8 +72,8 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy() {
-    if (this.client) await this.client.quit().catch(() => {});
-    if (this.subscriber) await this.subscriber.quit().catch(() => {});
+    if (this.client) await this.client.quit().catch(() => { });
+    if (this.subscriber) await this.subscriber.quit().catch(() => { });
     this.logger.log('Redis connections closed');
   }
 
