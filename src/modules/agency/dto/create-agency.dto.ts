@@ -4,7 +4,7 @@ export class CreateAgencyDto {
   @IsString()
   @MinLength(2)
   @MaxLength(100)
-  name: string;
+  name!: string;
 
   @IsOptional()
   @IsUUID()
