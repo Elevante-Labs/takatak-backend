@@ -8,7 +8,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { Throttle } from '@nestjs/throttler';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Request } from 'express';
 import { AuthService } from './auth.service';
 import { RequestOtpDto, VerifyOtpDto, RefreshTokenDto } from './dto';
@@ -16,10 +16,10 @@ import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.de
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(private readonly authService: AuthService) { }
 
   @Post('otp/request')
-  @Throttle({ default: { limit: 5, ttl: 300000 } }) // 5 requests per 5 minutes
+  @SkipThrottle()
   @HttpCode(HttpStatus.OK)
   async requestOtp(@Body() dto: RequestOtpDto, @Req() req: Request) {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
@@ -27,7 +27,7 @@ export class AuthController {
   }
 
   @Post('otp/verify')
-  @Throttle({ default: { limit: 10, ttl: 300000 } }) // 10 attempts per 5 minutes
+  @SkipThrottle()
   @HttpCode(HttpStatus.OK)
   async verifyOtp(@Body() dto: VerifyOtpDto, @Req() req: Request) {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
