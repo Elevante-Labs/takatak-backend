@@ -20,15 +20,19 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly redis: RedisService,
-  ) {}
+  ) { }
 
   async requestOtp(dto: RequestOtpDto, ip: string) {
-    // Rate limit check via Redis
-    const rateLimitKey = `otp_rate:${dto.phone}`;
-    const attempts = await this.redis.get(rateLimitKey);
+    // Rate limit check via Redis (skipped if Redis is unavailable)
+    if (!this.redis.isAvailable) {
+      this.logger.warn('Redis unavailable — skipping OTP rate limiting');
+    } else {
+      const rateLimitKey = `otp_rate:${dto.phone}`;
+      const attempts = await this.redis.get(rateLimitKey);
 
-    if (attempts && parseInt(attempts) >= 5) {
-      throw new BadRequestException('Too many OTP requests. Try again later.');
+      if (attempts && parseInt(attempts) >= 5) {
+        throw new BadRequestException('Too many OTP requests. Try again later.');
+      }
     }
 
     // Generate OTP (mock in development)
@@ -51,9 +55,12 @@ export class AuthService {
       },
     });
 
-    // Increment rate limit
-    await this.redis.increment(rateLimitKey);
-    await this.redis.expire(rateLimitKey, 300); // 5 minutes window
+    // Increment rate limit (only if Redis is available)
+    if (this.redis.isAvailable) {
+      const rateLimitKey = `otp_rate:${dto.phone}`;
+      await this.redis.increment(rateLimitKey);
+      await this.redis.expire(rateLimitKey, 300); // 5 minutes window
+    }
 
     this.logger.log(`OTP requested for ${dto.phone} from IP ${ip}`);
 
