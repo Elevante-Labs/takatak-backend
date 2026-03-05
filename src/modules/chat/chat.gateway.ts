@@ -35,8 +35,7 @@ interface AuthenticatedSocket extends Socket {
   transports: ['websocket', 'polling'],
 })
 export class ChatGateway
-  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
-{
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(ChatGateway.name);
 
   @WebSocketServer()
@@ -47,7 +46,7 @@ export class ChatGateway
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly redis: RedisService,
-  ) {}
+  ) { }
 
   afterInit() {
     this.logger.log('WebSocket Gateway initialized');
@@ -55,13 +54,18 @@ export class ChatGateway
     // Use @socket.io/redis-adapter for horizontal scaling.
     // This replaces manual psubscribe — the adapter transparently
     // broadcasts all socket.io events across instances via Redis.
-    const pubClient = this.redis.getClient();
-    
-    if (!pubClient) {
+    if (!this.redis.isAvailable) {
       this.logger.warn('Redis client not available; running in single-instance mode');
       return;
     }
-    
+
+    const pubClient = this.redis.getClient();
+
+    if (!pubClient) {
+      this.logger.warn('Redis pubClient is null; running in single-instance mode');
+      return;
+    }
+
     const subClient = pubClient.duplicate();
 
     subClient.on('error', (err) => {
@@ -76,12 +80,12 @@ export class ChatGateway
     try {
       console.log('WS CLIENT CONNECTED TO /chat:', client.id)
       let token =
-  client.handshake?.auth?.token ||
-  client.handshake?.headers?.authorization;
+        client.handshake?.auth?.token ||
+        client.handshake?.headers?.authorization;
 
-if (token?.startsWith('Bearer ')) {
-  token = token.split(' ')[1];
-}
+      if (token?.startsWith('Bearer ')) {
+        token = token.split(' ')[1];
+      }
       if (!token) {
         this.logger.warn(`Connection rejected: No token provided`);
         client.disconnect();
