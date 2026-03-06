@@ -98,8 +98,13 @@ export class ChatGateway
 
       client.user = payload;
 
-      // Track user's socket connection
-      await this.redis.set(`socket:${payload.sub}`, client.id, 3600);
+      // Join personal room so we can send targeted events (e.g. newChatNotification)
+      client.join(`user:${payload.sub}`);
+
+      // Track user's socket connection (only when Redis is available)
+      if (this.redis.isAvailable) {
+        await this.redis.set(`socket:${payload.sub}`, client.id, 3600);
+      }
 
       // DEBUG: Log socket connection
       console.log(`[SOCKET] ${payload.sub} connected on /chat namespace (id: ${client.id})`);
@@ -112,7 +117,10 @@ export class ChatGateway
 
   async handleDisconnect(client: AuthenticatedSocket) {
     if (client.user) {
-      await this.redis.del(`socket:${client.user.sub}`);
+      // Only clean up Redis when it is available
+      if (this.redis.isAvailable) {
+        await this.redis.del(`socket:${client.user.sub}`);
+      }
       this.logger.log(`Client disconnected: ${client.user.sub} (${client.id})`);
     }
   }
@@ -219,6 +227,20 @@ export class ChatGateway
           transactionId: result.transaction.transactionId,
           coinDeducted: result.transaction.coinAmount,
         });
+      }
+
+      // Notify the OTHER participant so their chat list auto-refreshes.
+      // We emit to the `user:<id>` personal room (each socket joins on connect).
+      if (result.otherUserId) {
+        this.server
+          .to(`user:${result.otherUserId}`)
+          .emit('newChatNotification', {
+            chatId: data.chatId,
+            senderId: client.user.sub,
+          });
+        this.logger.log(
+          `[WS] Emitted newChatNotification to user:${result.otherUserId}`
+        );
       }
 
     } catch (err) {

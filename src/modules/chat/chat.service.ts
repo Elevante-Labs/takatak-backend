@@ -37,7 +37,7 @@ export class ChatService {
     private readonly fraudService: FraudService,
     private readonly vipService: VipService,
     private readonly configService: ConfigService,
-  ) {}
+  ) { }
 
   // ──────────────────────────────────────────
   // Diamond earning rules (Phase 1)
@@ -231,7 +231,7 @@ export class ChatService {
 
     // HOST → anyone = free, no charge, no diamonds
     if (senderIsHost) {
-      return this.persistAndPublish(chatId, senderId, sanitized, 0, 0, null, idempotencyKey);
+      return this.persistAndPublish(chatId, senderId, sanitized, 0, 0, null, idempotencyKey, receiver.id);
     }
 
     // USER → HOST: check if mutual-follow-makes-free
@@ -241,7 +241,7 @@ export class ChatService {
         this.logger.log(
           `Mutual-follow-free: ${sender.id} <-> HOST ${receiver.id}, message is free`,
         );
-        return this.persistAndPublish(chatId, senderId, sanitized, 0, 0, null, idempotencyKey);
+        return this.persistAndPublish(chatId, senderId, sanitized, 0, 0, null, idempotencyKey, receiver.id);
       }
     }
 
@@ -308,6 +308,7 @@ export class ChatService {
       diamondGenerated,
       transactionResult,
       idempotencyKey,
+      receiver.id,
     );
   }
 
@@ -323,6 +324,7 @@ export class ChatService {
     diamondGenerated: number,
     transactionResult: any,
     idempotencyKey?: string,
+    otherUserId?: string,
   ) {
     // Dedup guard for very quick repeats (same ms)
     const dedupKey = `msg:${senderId}:${chatId}:${Date.now()}`;
@@ -355,6 +357,7 @@ export class ChatService {
     const result = {
       message: messagePayload,
       transaction: transactionResult,
+      otherUserId, // Passed through so gateway can notify the recipient
     };
 
     // if an idempotency key was provided, cache the final result so that
@@ -370,7 +373,7 @@ export class ChatService {
 
     this.logger.log(
       `Message sent in chat ${chatId} by ${senderId}` +
-        (coinCost > 0 ? ` (cost: ${coinCost} coins)` : ' (free)'),
+      (coinCost > 0 ? ` (cost: ${coinCost} coins)` : ' (free)'),
     );
 
     return result;
@@ -441,6 +444,7 @@ export class ChatService {
             select: {
               id: true,
               username: true,
+              phone: true,
               role: true,
               vipLevel: true,
             },
@@ -449,6 +453,7 @@ export class ChatService {
             select: {
               id: true,
               username: true,
+              phone: true,
               role: true,
               vipLevel: true,
             },
