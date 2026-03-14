@@ -28,11 +28,13 @@ interface AuthenticatedSocket extends Socket {
 
 @WebSocketGateway({
   cors: {
-    origin: '*', // Restrict in production
+    origin: true, // Reflect request origin (allows credentials)
     credentials: true,
   },
   namespace: '/chat',
   transports: ['websocket', 'polling'],
+  pingTimeout: 60000,
+  pingInterval: 25000,
 })
 export class ChatGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
@@ -207,9 +209,15 @@ export class ChatGateway
         `[WS] Broadcasting newMessage to room chat:${data.chatId}`
       );
 
-      this.server
+      // Broadcast to room EXCEPT the sender — the sender receives
+      // the authoritative copy via 'messageAck' and reconciles its
+      // optimistic bubble. This prevents duplicate messages.
+      client
         .to(`chat:${data.chatId}`)
-        .emit('newMessage', result.message);
+        .emit('newMessage', {
+          ...result.message,
+          idempotencyKey: data.idempotencyKey,
+        });
 
       this.logger.log(
         `[WS] Emitting messageAck to sender ${client.id} for key ${data.idempotencyKey}`

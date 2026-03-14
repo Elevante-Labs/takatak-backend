@@ -146,6 +146,41 @@ export class UsersService {
   }
 
   /**
+   * Get all other active users available for chat (excludes the caller).
+   * Returns USERs and HOSTs so both roles can discover each other.
+   */
+  async getChatPartners(currentUserId: string, page?: number, limit?: number) {
+    const params = getPaginationParams(page, limit);
+
+    const where = {
+      id: { not: currentUserId },
+      isActive: true,
+      deletedAt: null,
+      role: { in: ['USER' as any, 'HOST' as any] },
+    };
+
+    const [users, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        skip: (params.page - 1) * params.limit,
+        take: params.limit,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          username: true,
+          role: true,
+          vipLevel: true,
+          country: true,
+          isVerified: true,
+        },
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return buildPaginatedResult(users, total, params);
+  }
+
+  /**
    * Get online hosts sorted by promotion score.
    *
    * promotionScore =

@@ -168,6 +168,8 @@ export class AuthService {
         secret: this.configService.get<string>('jwt.refreshSecret'),
       });
 
+      this.logger.debug(`[Refresh] JWT verified for user ${payload.sub}`);
+
       // Verify user still exists and is active
       const user = await this.prisma.user.findUnique({
         where: { id: payload.sub },
@@ -175,12 +177,14 @@ export class AuthService {
       });
 
       if (!user || !user.isActive || user.deletedAt) {
+        this.logger.warn(`[Refresh] User inactive or deleted: ${payload.sub}`);
         throw new UnauthorizedException('User account is inactive');
       }
 
       // Check if token is blacklisted
       const isBlacklisted = await this.redis.exists(`blacklist:${dto.refreshToken}`);
       if (isBlacklisted) {
+        this.logger.warn(`[Refresh] Token already blacklisted for user ${payload.sub}`);
         throw new UnauthorizedException('Token has been revoked');
       }
 
@@ -190,6 +194,7 @@ export class AuthService {
       return this.generateTokens(user.id, user.phone, user.role);
     } catch (error) {
       if (error instanceof UnauthorizedException) throw error;
+      this.logger.warn(`[Refresh] JWT verify failed: ${(error as Error).message}`);
       throw new UnauthorizedException('Invalid refresh token');
     }
   }

@@ -40,6 +40,14 @@ export class UsersController {
     return this.usersService.getOnlineHosts(query.page, query.limit);
   }
 
+  @Get('chat-partners')
+  async getChatPartners(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: PaginationDto,
+  ) {
+    return this.usersService.getChatPartners(user.sub, query.page, query.limit);
+  }
+
   @Get(':id')
   async getUserById(@Param('id', ParseUUIDPipe) id: string) {
     return this.usersService.findById(id);
