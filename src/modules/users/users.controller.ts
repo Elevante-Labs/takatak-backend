@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { UsersService } from './users.service';
-import { UpdateUserDto, AdminUpdateUserDto } from './dto';
+import { UpdateUserDto, AdminUpdateUserDto, AvailableUsersQueryDto } from './dto';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -33,6 +33,19 @@ export class UsersController {
     @Body() dto: UpdateUserDto,
   ) {
     return this.usersService.updateProfile(user.sub, dto);
+  }
+
+  @Get('available')
+  async getAvailableUsers(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: AvailableUsersQueryDto,
+  ) {
+    return this.usersService.getAvailableUsers(
+      user.sub,
+      query.role,
+      query.page,
+      query.limit,
+    );
   }
 
   @Get('hosts')

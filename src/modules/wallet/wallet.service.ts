@@ -237,10 +237,15 @@ export class WalletService {
       throw new BadRequestException('Coin cost must be positive');
     }
 
+    console.log(`[PAYMENT] Starting chat payment: ${senderId} → ${receiverId}, coins: ${coinCost}, diamonds: ${diamondGenerated}`);
+
     // Idempotency guard
     if (idempotencyKey) {
       const existing = await this.checkIdempotency(idempotencyKey);
-      if (existing) return existing;
+      if (existing) {
+        console.log(`[PAYMENT] Idempotency cache hit for key: ${idempotencyKey}`);
+        return existing;
+      }
     }
 
     // Track tier changes for post-commit event emission
@@ -270,6 +275,7 @@ export class WalletService {
           }
 
           const totalCoins = senderWallet.giftCoins + senderWallet.gameCoins;
+          console.log(`[PAYMENT] Sender wallet before payment - giftCoins: ${senderWallet.giftCoins}, gameCoins: ${senderWallet.gameCoins}, total: ${totalCoins}`);
 
           if (totalCoins < coinCost) {
             throw new BadRequestException(
@@ -301,7 +307,7 @@ export class WalletService {
           }
 
           // 1. Deduct from sender
-          await tx.wallet.update({
+          const updatedSenderWallet = await tx.wallet.update({
             where: { userId: senderId },
             data: {
               gameCoins: { decrement: gameCoinsDeducted },
@@ -309,24 +315,37 @@ export class WalletService {
             },
           });
 
+          console.log(`[PAYMENT] Sender wallet after deduction - giftCoins: ${updatedSenderWallet.giftCoins}, gameCoins: ${updatedSenderWallet.gameCoins}, total: ${updatedSenderWallet.giftCoins + updatedSenderWallet.gameCoins}`);
+
           // 2. Lock receiver wallet row
           const receiverWallets = await tx.$queryRaw<
-            Array<{ id: string; userId: string }>
+            Array<{ 
+              id: string; 
+              userId: string;
+              diamonds: number;
+              promoDiamonds: number;
+            }>
           >(
             Prisma.sql`SELECT * FROM wallets WHERE "userId" = ${receiverId}::uuid FOR UPDATE`,
           );
 
-          if (!receiverWallets[0]) {
+          const receiverWalletBefore = receiverWallets[0];
+
+          if (!receiverWalletBefore) {
             throw new NotFoundException('Receiver wallet not found');
           }
 
+          console.log(`[PAYMENT] Receiver wallet before credit - diamonds: ${receiverWalletBefore.diamonds}, promoDiamonds: ${receiverWalletBefore.promoDiamonds}`);
+
           // 3. Credit diamonds to receiver
-          await tx.wallet.update({
+          const updatedReceiverWallet = await tx.wallet.update({
             where: { userId: receiverId },
             data: usePromoDiamonds
               ? { promoDiamonds: { increment: diamondGenerated } }
               : { diamonds: { increment: diamondGenerated } },
           });
+
+          console.log(`[PAYMENT] Receiver wallet after credit - diamonds: ${updatedReceiverWallet.diamonds}, promoDiamonds: ${updatedReceiverWallet.promoDiamonds}`);
 
           // 4. Create immutable transaction record
           const transaction = await tx.transaction.create({
@@ -361,6 +380,8 @@ export class WalletService {
             tierChanges = commissionResult.tierChanges;
           }
 
+          console.log(`[PAYMENT] Transaction created: ${transaction.id}, type: ${transaction.type}, status: ${transaction.status}`);
+
           this.logger.log(
             `Chat payment: ${coinCost} coins from ${senderId} → ${diamondGenerated} diamonds to ${receiverId} (tx: ${transaction.id})`,
           );
@@ -370,6 +391,7 @@ export class WalletService {
             status: transaction.status,
             coinAmount: coinCost,
             diamondAmount: diamondGenerated,
+            receiverId: receiverId,
           };
         },
         {
@@ -378,6 +400,8 @@ export class WalletService {
           timeout: 15000, // Extended: commission runs inside now
         },
       );
+
+      console.log(`[PAYMENT] Transaction completed successfully: ${result.transactionId}`);
 
       // ── Post-commit actions (fire-and-forget) ──
 
@@ -405,6 +429,7 @@ export class WalletService {
 
       return result;
     } catch (error) {
+      console.error(`[PAYMENT] FAILED: ${(error as Error).message}`);
       await this.logFailedTransaction(TransactionType.CHAT_PAYMENT, (error as Error).message, {
         idempotencyKey,
         senderId,

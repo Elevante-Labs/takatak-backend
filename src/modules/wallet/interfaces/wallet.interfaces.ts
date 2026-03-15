@@ -34,4 +34,5 @@ export interface TransactionResult {
   status: TransactionStatus;
   coinAmount: number;
   diamondAmount: number;
+  receiverId?: string;
 }

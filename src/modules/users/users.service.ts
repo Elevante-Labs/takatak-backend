@@ -292,6 +292,52 @@ export class UsersService {
     return buildPaginatedResult(paged, total, params);
   }
 
+  /**
+   * Get available users filtered by role, excluding the current user.
+   * USERs call with role=HOST, HOSTs call with role=USER, etc.
+   */
+  async getAvailableUsers(
+    currentUserId: string,
+    role: string,
+    page?: number,
+    limit?: number,
+  ): Promise<PaginatedResult<Partial<User>>> {
+    const params = getPaginationParams(page, limit);
+
+    const where = {
+      id: { not: currentUserId },
+      role: role as any,
+      isActive: true,
+      deletedAt: null,
+    };
+
+    const [users, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        skip: (params.page - 1) * params.limit,
+        take: params.limit,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          username: true,
+          role: true,
+          vipLevel: true,
+          country: true,
+          isVerified: true,
+          isActive: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    this.logger.log(
+      `getAvailableUsers: role=${role}, currentUser=${currentUserId}, found=${total}`,
+    );
+
+    return buildPaginatedResult(users, total, params);
+  }
+
   private sanitizeUser(user: any) {
     const { deviceFingerprint, lastLoginIp, deletedAt, ...sanitized } = user;
     return sanitized;
