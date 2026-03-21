@@ -237,10 +237,26 @@ export class ChatGateway
       });
 
       if (result.transaction) {
+        // Send sender's NEW total coin balance (not just the amount deducted)
         client.emit('paymentConfirmed', {
           transactionId: result.transaction.transactionId,
           coinDeducted: result.transaction.coinAmount,
+          senderCoins: result.senderBalance
+            ? result.senderBalance.totalCoins
+            : null,
         });
+
+        // ── Notify HOST of diamond balance update ──
+        if (result.otherUserId && result.receiverBalance) {
+          this.server
+            .to(`user:${result.otherUserId}`)
+            .emit('walletUpdated', {
+              diamonds: result.receiverBalance.diamonds,
+            });
+          this.logger.log(
+            `[WS] Emitted walletUpdated (diamonds: ${result.receiverBalance.diamonds}) to user:${result.otherUserId}`
+          );
+        }
       }
 
       // Notify the OTHER participant so their chat list auto-refreshes.
@@ -252,6 +268,20 @@ export class ChatGateway
             chatId: data.chatId,
             senderId: client.user.sub,
           });
+
+        // ── Emit intimacy update to the HOST so their badge updates too ──
+        if (result.intimacy) {
+          this.server
+            .to(`user:${result.otherUserId}`)
+            .emit('intimacyUpdated', {
+              chatId: data.chatId,
+              intimacy: result.intimacy,
+            });
+          this.logger.log(
+            `[WS] Emitted intimacyUpdated to user:${result.otherUserId}`
+          );
+        }
+
         this.logger.log(
           `[WS] Emitted newChatNotification to user:${result.otherUserId}`
         );

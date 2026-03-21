@@ -49,11 +49,11 @@ export class ChatController {
     );
   }
 
-  @Get('intimacy/:hostId')
+  @Get('intimacy/:otherUserId')
   async getIntimacy(
     @CurrentUser() user: JwtPayload,
-    @Param('hostId', ParseUUIDPipe) hostId: string,
+    @Param('otherUserId', ParseUUIDPipe) otherUserId: string,
   ) {
-    return this.chatService.getIntimacyInfo(user.sub, hostId);
+    return this.chatService.getIntimacyInfo(user.sub, user.role, otherUserId);
   }
 }

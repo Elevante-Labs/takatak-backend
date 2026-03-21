@@ -106,6 +106,24 @@ export class IntimacyService {
     return updated;
   }
 
+  /**
+   * Compute display info from an existing intimacy record (avoids extra DB query).
+   */
+  getDisplayInfo(record: { level: number; points: number }) {
+    const nextLevel = LEVEL_THRESHOLDS.find((t) => t.level === record.level + 1);
+    const currentMin = LEVEL_THRESHOLDS.find((t) => t.level === record.level)?.minPoints ?? 0;
+    return {
+      level: record.level,
+      points: record.points,
+      nextLevelAt: nextLevel?.minPoints ?? null,
+      progressPercent: nextLevel
+        ? Math.round(
+            ((record.points - currentMin) / (nextLevel.minPoints - currentMin)) * 100,
+          )
+        : 100,
+    };
+  }
+
   private calculateLevel(points: number): number {
     let level = 1;
     for (const threshold of LEVEL_THRESHOLDS) {

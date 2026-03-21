@@ -252,8 +252,12 @@ export class ChatService {
           `Mutual-follow-free: ${sender.id} <-> HOST ${receiver.id}, message is free`,
         );
         // Still update intimacy even for free messages
-        await this.intimacyService.onMessageSent(sender.id, receiver.id).catch(() => {});
-        return this.persistAndPublish(chatId, senderId, sanitized, 0, 0, null, idempotencyKey, receiver.id, messageType, mediaUrl);
+        const freeIntimacy = await this.intimacyService.onMessageSent(sender.id, receiver.id).catch(() => null);
+        const freeResult = await this.persistAndPublish(chatId, senderId, sanitized, 0, 0, null, idempotencyKey, receiver.id, messageType, mediaUrl);
+        if (freeIntimacy) {
+          freeResult.intimacy = this.intimacyService.getDisplayInfo(freeIntimacy);
+        }
+        return freeResult;
       }
     }
 
@@ -332,10 +336,19 @@ export class ChatService {
     );
 
     if (intimacyUpdate) {
-      result.intimacy = {
-        level: intimacyUpdate.level,
-        points: intimacyUpdate.points,
-      };
+      result.intimacy = this.intimacyService.getDisplayInfo(intimacyUpdate);
+    }
+
+    // Fetch updated wallet balances for real-time socket emission
+    try {
+      const [senderBalance, receiverBalance] = await Promise.all([
+        this.walletService.getBalance(sender.id),
+        this.walletService.getBalance(receiver.id),
+      ]);
+      result.senderBalance = senderBalance;
+      result.receiverBalance = receiverBalance;
+    } catch (e) {
+      this.logger.warn(`Failed to fetch post-payment balances: ${(e as Error).message}`);
     }
 
     return result;
@@ -534,9 +547,18 @@ export class ChatService {
   }
 
   /**
-   * Get intimacy info for a chat between userId and hostId.
+   * Get intimacy info for a chat between current user and other user.
+   * Resolves the correct userId/hostId based on roles.
    */
-  async getIntimacyInfo(userId: string, hostId: string) {
-    return this.intimacyService.getIntimacyInfo(userId, hostId);
+  async getIntimacyInfo(currentUserId: string, currentUserRole: string, otherUserId: string) {
+    // Intimacy is stored as userId (USER) → hostId (HOST)
+    // Determine which is which based on the current user's role
+    if (currentUserRole === 'HOST') {
+      // Current user is HOST, other user is USER
+      return this.intimacyService.getIntimacyInfo(otherUserId, currentUserId);
+    } else {
+      // Current user is USER, other user is HOST
+      return this.intimacyService.getIntimacyInfo(currentUserId, otherUserId);
+    }
   }
 }

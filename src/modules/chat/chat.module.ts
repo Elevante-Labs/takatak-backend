@@ -28,4 +28,5 @@ import { UploadModule } from '../upload/upload.module';
   ],
   controllers: [ChatController],
   providers: [ChatService, ChatGateway, IntimacyService],
-  exports: [ChatService, IntimacyService],
+  exports: [ChatService, IntimacyService],})
+export class ChatModule {}
