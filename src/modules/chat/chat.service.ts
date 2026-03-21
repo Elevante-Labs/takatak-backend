@@ -11,10 +11,13 @@ import { RedisService } from '../../database/redis.service';
 import { WalletService } from '../wallet/wallet.service';
 import { FraudService } from '../fraud/fraud.service';
 import { VipService } from '../vip/vip.service';
+import { IntimacyService } from './intimacy.service';
 import {
   getPaginationParams,
   buildPaginatedResult,
 } from '../../common/utils/pagination.util';
+
+type MessageType = 'TEXT' | 'IMAGE' | 'EMOJI';
 
 /**
  * Referral abuse window: diamonds generated from chats between
@@ -37,6 +40,7 @@ export class ChatService {
     private readonly fraudService: FraudService,
     private readonly vipService: VipService,
     private readonly configService: ConfigService,
+    private readonly intimacyService: IntimacyService,
   ) { }
 
   // ──────────────────────────────────────────
@@ -147,6 +151,8 @@ export class ChatService {
     chatId: string,
     content: string,
     idempotencyKey?: string,
+    messageType: MessageType = 'TEXT',
+    mediaUrl?: string,
   ) {
     // ── early idempotency lookup ──
     if (idempotencyKey) {
@@ -159,17 +165,21 @@ export class ChatService {
     }
 
     // ── 1. Content validation & sanitization ──
-    const sanitized = this.sanitizeContent(content);
-    const maxLength = await this.getMaxMessageLength();
-
-    if (!sanitized || sanitized.length === 0) {
-      throw new BadRequestException('Message content cannot be empty');
-    }
-
-    if (sanitized.length > maxLength) {
-      throw new BadRequestException(
-        `Message exceeds maximum length of ${maxLength} characters`,
-      );
+    let sanitized = content;
+    if (messageType === 'IMAGE') {
+      if (!mediaUrl) throw new BadRequestException('Image URL is required for image messages');
+      sanitized = content || '📷 Image';
+    } else {
+      sanitized = this.sanitizeContent(content);
+      const maxLength = await this.getMaxMessageLength();
+      if (!sanitized || sanitized.length === 0) {
+        throw new BadRequestException('Message content cannot be empty');
+      }
+      if (sanitized.length > maxLength) {
+        throw new BadRequestException(
+          `Message exceeds maximum length of ${maxLength} characters`,
+        );
+      }
     }
 
     // ── 2. Validate chat and participants ──
@@ -231,7 +241,7 @@ export class ChatService {
 
     // HOST → anyone = free, no charge, no diamonds
     if (senderIsHost) {
-      return this.persistAndPublish(chatId, senderId, sanitized, 0, 0, null, idempotencyKey, receiver.id);
+      return this.persistAndPublish(chatId, senderId, sanitized, 0, 0, null, idempotencyKey, receiver.id, messageType, mediaUrl);
     }
 
     // USER → HOST: check if mutual-follow-makes-free
@@ -241,7 +251,9 @@ export class ChatService {
         this.logger.log(
           `Mutual-follow-free: ${sender.id} <-> HOST ${receiver.id}, message is free`,
         );
-        return this.persistAndPublish(chatId, senderId, sanitized, 0, 0, null, idempotencyKey, receiver.id);
+        // Still update intimacy even for free messages
+        await this.intimacyService.onMessageSent(sender.id, receiver.id).catch(() => {});
+        return this.persistAndPublish(chatId, senderId, sanitized, 0, 0, null, idempotencyKey, receiver.id, messageType, mediaUrl);
       }
     }
 
@@ -300,7 +312,13 @@ export class ChatService {
       idempotencyKey: paymentIdempotencyKey,
     });
 
-    return this.persistAndPublish(
+    // Update intimacy for USER → HOST messages
+    let intimacyUpdate = null;
+    if (receiverIsHost) {
+      intimacyUpdate = await this.intimacyService.onMessageSent(sender.id, receiver.id).catch(() => null);
+    }
+
+    const result = await this.persistAndPublish(
       chatId,
       senderId,
       sanitized,
@@ -309,7 +327,18 @@ export class ChatService {
       transactionResult,
       idempotencyKey,
       receiver.id,
+      messageType,
+      mediaUrl,
     );
+
+    if (intimacyUpdate) {
+      result.intimacy = {
+        level: intimacyUpdate.level,
+        points: intimacyUpdate.points,
+      };
+    }
+
+    return result;
   }
 
   /**
@@ -325,6 +354,8 @@ export class ChatService {
     transactionResult: any,
     idempotencyKey?: string,
     otherUserId?: string,
+    messageType: MessageType = 'TEXT',
+    mediaUrl?: string,
   ) {
     // Dedup guard for very quick repeats (same ms)
     const dedupKey = `msg:${senderId}:${chatId}:${Date.now()}`;
@@ -339,6 +370,8 @@ export class ChatService {
         chatId,
         senderId,
         content,
+        messageType,
+        mediaUrl: mediaUrl || null,
         coinCost,
         diamondGenerated,
       },
@@ -349,12 +382,14 @@ export class ChatService {
       chatId: message.chatId,
       senderId: message.senderId,
       content: message.content,
+      messageType: message.messageType,
+      mediaUrl: message.mediaUrl,
       coinCost: message.coinCost,
       diamondGenerated: message.diamondGenerated,
       createdAt: message.createdAt.toISOString(),
     };
 
-    const result = {
+    const result: any = {
       message: messagePayload,
       transaction: transactionResult,
       otherUserId, // Passed through so gateway can notify the recipient
@@ -411,8 +446,8 @@ export class ChatService {
           id: true,
           chatId: true,
           senderId: true,
-          content: true,
-          coinCost: true,
+          content: true,          messageType: true,
+          mediaUrl: true,          coinCost: true,
           createdAt: true,
         },
       }),
@@ -496,5 +531,12 @@ export class ChatService {
       where: { userId, chatId, isActive: true },
       data: { isActive: false, leftAt: new Date() },
     });
+  }
+
+  /**
+   * Get intimacy info for a chat between userId and hostId.
+   */
+  async getIntimacyInfo(userId: string, hostId: string) {
+    return this.intimacyService.getIntimacyInfo(userId, hostId);
   }
 }

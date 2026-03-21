@@ -1,4 +1,10 @@
-import { IsUUID, IsString, IsNotEmpty } from 'class-validator';
+import { IsUUID, IsString, IsNotEmpty, IsOptional, IsEnum, IsUrl } from 'class-validator';
+
+export enum MessageTypeDto {
+  TEXT = 'TEXT',
+  IMAGE = 'IMAGE',
+  EMOJI = 'EMOJI',
+}
 
 export class SendMessageDto {
   @IsUUID()
@@ -11,4 +17,12 @@ export class SendMessageDto {
   @IsString()
   @IsNotEmpty()
   idempotencyKey!: string;
+
+  @IsOptional()
+  @IsEnum(MessageTypeDto)
+  messageType?: MessageTypeDto;
+
+  @IsOptional()
+  @IsString()
+  mediaUrl?: string;
 }

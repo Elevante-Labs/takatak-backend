@@ -198,11 +198,14 @@ export class ChatGateway
     }
 
     try {
+      const messageType = (data.messageType as any) || 'TEXT';
       const result = await this.chatService.sendMessage(
         client.user.sub,
         data.chatId,
         data.content,
         data.idempotencyKey,
+        messageType,
+        data.mediaUrl,
       );
 
       this.logger.log(
@@ -228,6 +231,9 @@ export class ChatGateway
         idempotencyKey: data.idempotencyKey,
         messageId: result.message.id,
         createdAt: result.message.createdAt,
+        messageType: result.message.messageType,
+        mediaUrl: result.message.mediaUrl,
+        intimacy: result.intimacy || null,
       });
 
       if (result.transaction) {

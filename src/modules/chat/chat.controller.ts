@@ -48,4 +48,12 @@ export class ChatController {
       query.limit,
     );
   }
+
+  @Get('intimacy/:hostId')
+  async getIntimacy(
+    @CurrentUser() user: JwtPayload,
+    @Param('hostId', ParseUUIDPipe) hostId: string,
+  ) {
+    return this.chatService.getIntimacyInfo(user.sub, hostId);
+  }
 }

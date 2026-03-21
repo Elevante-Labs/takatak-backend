@@ -57,6 +57,12 @@ enum FraudFlagType {
   SUSPICIOUS_PATTERN
 }
 
+enum MessageType {
+  TEXT
+  IMAGE
+  EMOJI
+}
+
 // ============================================
 // USER
 // ============================================
@@ -94,6 +100,8 @@ model User {
   withdrawals      WithdrawalRequest[]
   agency           Agency?        @relation("AgencyOwner")
   hostProfile      HostProfile?
+  intimaciesAsUser Intimacy[]     @relation("UserIntimacy")
+  intimaciesAsHost Intimacy[]     @relation("HostIntimacy")
 
   @@index([phone])
   @@index([deviceFingerprint])
@@ -189,13 +197,15 @@ model Chat {
 }
 
 model Message {
-  id               String   @id @default(uuid()) @db.Uuid
-  chatId           String   @db.Uuid
-  senderId         String   @db.Uuid
+  id               String      @id @default(uuid()) @db.Uuid
+  chatId           String      @db.Uuid
+  senderId         String      @db.Uuid
   content          String
-  coinCost         Int      @default(0)
-  diamondGenerated Int      @default(0)
-  createdAt        DateTime @default(now())
+  messageType      MessageType @default(TEXT)
+  mediaUrl         String?
+  coinCost         Int         @default(0)
+  diamondGenerated Int         @default(0)
+  createdAt        DateTime    @default(now())
 
   chat   Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
   sender User @relation("SenderMessages", fields: [senderId], references: [id])
@@ -503,6 +513,30 @@ model HostRewardClaim {
   @@index([rewardType])
   @@index([date])
   @@map("host_reward_claims")
+}
+
+// ============================================
+// INTIMACY (relationship level between user pairs)
+// ============================================
+
+model Intimacy {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  hostId    String   @db.Uuid
+  points    Int      @default(0)
+  level     Int      @default(1)
+  lastMessageAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation("UserIntimacy", fields: [userId], references: [id])
+  host User @relation("HostIntimacy", fields: [hostId], references: [id])
+
+  @@unique([userId, hostId])
+  @@index([userId])
+  @@index([hostId])
+  @@index([level])
+  @@map("intimacies")
 }
 
 // ============================================

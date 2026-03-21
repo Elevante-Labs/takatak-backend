@@ -4,15 +4,18 @@ import { ConfigService } from '@nestjs/config';
 import { ChatController } from './chat.controller';
 import { ChatService } from './chat.service';
 import { ChatGateway } from './chat.gateway';
+import { IntimacyService } from './intimacy.service';
 import { WalletModule } from '../wallet/wallet.module';
 import { FraudModule } from '../fraud/fraud.module';
 import { VipModule } from '../vip/vip.module';
+import { UploadModule } from '../upload/upload.module';
 
 @Module({
   imports: [
     WalletModule,
     forwardRef(() => FraudModule),
     VipModule,
+    UploadModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
@@ -24,7 +27,5 @@ import { VipModule } from '../vip/vip.module';
     }),
   ],
   controllers: [ChatController],
-  providers: [ChatService, ChatGateway],
-  exports: [ChatService],
-})
-export class ChatModule {}
+  providers: [ChatService, ChatGateway, IntimacyService],
+  exports: [ChatService, IntimacyService],

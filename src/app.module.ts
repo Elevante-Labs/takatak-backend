@@ -19,6 +19,7 @@ import { AgencyModule } from './modules/agency/agency.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { FollowModule } from './modules/follow/follow.module';
 import { HealthModule } from './modules/health/health.module';
+import { UploadModule } from './modules/upload/upload.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
@@ -52,6 +53,7 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
     AdminModule,
     FollowModule,
     HealthModule,
+    UploadModule,
   ],
   providers: [
     {

@@ -48,4 +48,10 @@ export default () => ({
     maxMessagesPerMinute: parseInt(process.env.MAX_MESSAGES_PER_MINUTE || '30', 10),
     maxAccountsPerDevice: parseInt(process.env.MAX_ACCOUNTS_PER_DEVICE || '2', 10),
   },
+
+  cloudinary: {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
+    apiKey: process.env.CLOUDINARY_API_KEY || '',
+    apiSecret: process.env.CLOUDINARY_API_SECRET || '',
+  },
 });
