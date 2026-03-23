@@ -63,6 +63,26 @@ enum MessageType {
   EMOJI
 }
 
+enum IntimacyActionType {
+  CHAT
+  GIFT
+  CALL
+  ROOM
+}
+
+enum RelationshipType {
+  NONE
+  FRIEND
+  COUPLE
+}
+
+enum RelationshipStatus {
+  PENDING
+  ACTIVE
+  EXPIRED
+  REJECTED
+}
+
 // ============================================
 // USER
 // ============================================
@@ -100,8 +120,8 @@ model User {
   withdrawals      WithdrawalRequest[]
   agency           Agency?        @relation("AgencyOwner")
   hostProfile      HostProfile?
-  intimaciesAsUser Intimacy[]     @relation("UserIntimacy")
-  intimaciesAsHost Intimacy[]     @relation("HostIntimacy")
+  intimaciesAsUserA Intimacy[]    @relation("UserAIntimacy")
+  intimaciesAsUserB Intimacy[]    @relation("UserBIntimacy")
 
   @@index([phone])
   @@index([deviceFingerprint])
@@ -520,23 +540,67 @@ model HostRewardClaim {
 // ============================================
 
 model Intimacy {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String   @db.Uuid
-  hostId    String   @db.Uuid
-  points    Int      @default(0)
-  level     Int      @default(1)
-  lastMessageAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                String           @id @default(uuid()) @db.Uuid
+  userAId           String           @db.Uuid
+  userBId           String           @db.Uuid
+  intimacyScore     Int              @default(0)
+  level             Int              @default(0)
+  relationshipType  RelationshipType @default(NONE)
+  lastInteractionAt DateTime?
+  dailyChatRounds   Int              @default(0)
+  dailyChatDate     DateTime?        @db.Date
+  isActive          Boolean          @default(true)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
-  user User @relation("UserIntimacy", fields: [userId], references: [id])
-  host User @relation("HostIntimacy", fields: [hostId], references: [id])
+  userA        User            @relation("UserAIntimacy", fields: [userAId], references: [id])
+  userB        User            @relation("UserBIntimacy", fields: [userBId], references: [id])
+  logs         IntimacyLog[]
+  relationship Relationship?
 
-  @@unique([userId, hostId])
-  @@index([userId])
-  @@index([hostId])
+  @@unique([userAId, userBId])
+  @@index([userAId])
+  @@index([userBId])
   @@index([level])
+  @@index([lastInteractionAt])
   @@map("intimacies")
+}
+
+model IntimacyLog {
+  id         String            @id @default(uuid()) @db.Uuid
+  intimacyId String            @db.Uuid
+  actionType IntimacyActionType
+  value      Int               @default(0)
+  metadata   Json?
+  createdAt  DateTime          @default(now())
+
+  intimacy Intimacy @relation(fields: [intimacyId], references: [id], onDelete: Cascade)
+
+  @@index([intimacyId])
+  @@index([actionType])
+  @@index([createdAt])
+  @@map("intimacy_logs")
+}
+
+model Relationship {
+  id         String             @id @default(uuid()) @db.Uuid
+  intimacyId String             @unique @db.Uuid
+  type       RelationshipType
+  inviterId  String             @db.Uuid
+  inviteeId  String             @db.Uuid
+  status     RelationshipStatus @default(PENDING)
+  startedAt  DateTime?
+  expiresAt  DateTime?
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  intimacy Intimacy @relation(fields: [intimacyId], references: [id], onDelete: Cascade)
+
+  @@index([inviterId])
+  @@index([inviteeId])
+  @@index([status])
+  @@index([expiresAt])
+  @@map("relationships")
 }
 
 // ============================================

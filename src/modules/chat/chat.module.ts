@@ -9,6 +9,7 @@ import { WalletModule } from '../wallet/wallet.module';
 import { FraudModule } from '../fraud/fraud.module';
 import { VipModule } from '../vip/vip.module';
 import { UploadModule } from '../upload/upload.module';
+import { IntimacyModule } from '../intimacy/intimacy.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { UploadModule } from '../upload/upload.module';
     forwardRef(() => FraudModule),
     VipModule,
     UploadModule,
+    IntimacyModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
@@ -28,5 +30,6 @@ import { UploadModule } from '../upload/upload.module';
   ],
   controllers: [ChatController],
   providers: [ChatService, ChatGateway, IntimacyService],
-  exports: [ChatService, IntimacyService],})
+  exports: [ChatService, IntimacyService],
+})
 export class ChatModule {}
