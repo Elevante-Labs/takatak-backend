@@ -1,0 +1,90 @@
+version: '3.9'
+
+services:
+  # ─── PostgreSQL ─────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: takatak-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: takatak
+      POSTGRES_PASSWORD: takatak_secret
+      POSTGRES_DB: takatak
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U takatak']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Redis ──────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: takatak-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Application ────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: takatak-app
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://takatak:takatak_secret@postgres:5432/takatak?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-change-me-access-secret-in-production}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-refresh-secret-in-production}
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      OTP_EXPIRES_IN_MINUTES: 5
+      OTP_MAX_ATTEMPTS: 5
+      WALLET_SIGNUP_GIFT_COINS: 100
+      WALLET_MESSAGE_COIN_COST: 10
+      WALLET_COIN_TO_DIAMOND_RATIO: 1
+      REFERRAL_REFERRER_BONUS: 50
+      REFERRAL_REFEREE_BONUS: 25
+      REFERRAL_FIRST_CHAT_BONUS: 10
+      REFERRAL_MAX_PER_DEVICE: 5
+      VIP_DISCOUNT_PERCENT: 10
+      VIP_MAX_DISCOUNT: 50
+      FRAUD_MESSAGE_RATE_LIMIT: 30
+      FRAUD_MESSAGE_RATE_WINDOW: 60
+      CORS_ORIGIN: '*'
+      THROTTLE_TTL: 60
+      THROTTLE_LIMIT: 100
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/health/ping || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

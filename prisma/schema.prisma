@@ -1,0 +1,555 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum Role {
+  USER
+  HOST
+  AGENCY
+  ADMIN
+}
+
+enum TransactionType {
+  RECHARGE
+  CHAT_PAYMENT
+  REFERRAL_REWARD
+  DAILY_BONUS
+  PROMO
+  COIN_TO_DIAMOND
+  DIAMOND_TO_COIN
+  WITHDRAWAL
+  AGENCY_COMMISSION
+  AGENCY_COMMISSION_REVERSAL
+  HOST_SALARY_BONUS
+  HOST_LIVE_BONUS
+  HOST_NEW_REWARD
+  HOST_ORDINARY_REWARD
+  HOST_SUPERSTAR_SALARY
+}
+
+enum WithdrawalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REVERSED
+}
+
+enum FraudFlagType {
+  MULTI_ACCOUNT
+  SELF_CHAT
+  RATE_ABUSE
+  DEVICE_ANOMALY
+  SUSPICIOUS_PATTERN
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  EMOJI
+}
+
+// ============================================
+// USER
+// ============================================
+
+model User {
+  id                String    @id @default(uuid()) @db.Uuid
+  phone             String    @unique
+  username          String?   @unique
+  role              Role      @default(USER)
+  vipLevel          Int       @default(0)
+  vipExpiry         DateTime?
+  country           String?
+  isVerified        Boolean   @default(false)
+  deviceFingerprint String?
+  lastLoginIp       String?
+  isActive          Boolean   @default(true)
+  deletedAt         DateTime? // Soft delete
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  wallet           Wallet?
+  otps             Otp[]
+  sentMessages     Message[]      @relation("SenderMessages")
+  chatsAsUser1     Chat[]         @relation("ChatUser1")
+  chatsAsUser2     Chat[]         @relation("ChatUser2")
+  sentTransactions Transaction[]  @relation("SenderTransactions")
+  recvTransactions Transaction[]  @relation("ReceiverTransactions")
+  referralsMade    Referral[]     @relation("ReferrerRelation")
+  referralsReceived Referral[]    @relation("ReferredRelation")
+  fraudFlags       FraudFlag[]
+  chatSessions     ChatSession[]
+  followers        Follow[]       @relation("FollowerRelation")
+  following        Follow[]       @relation("FolloweeRelation")
+  withdrawals      WithdrawalRequest[]
+  agency           Agency?        @relation("AgencyOwner")
+  hostProfile      HostProfile?
+  intimaciesAsUser Intimacy[]     @relation("UserIntimacy")
+  intimaciesAsHost Intimacy[]     @relation("HostIntimacy")
+
+  @@index([phone])
+  @@index([deviceFingerprint])
+  @@index([createdAt])
+  @@map("users")
+}
+
+// ============================================
+// OTP
+// ============================================
+
+model Otp {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @db.Uuid
+  phone     String
+  code      String
+  expiresAt DateTime
+  verified  Boolean  @default(false)
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([phone, code])
+  @@index([expiresAt])
+  @@map("otps")
+}
+
+// ============================================
+// WALLET (Immutable ledger pattern)
+// ============================================
+
+model Wallet {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @unique @db.Uuid
+  giftCoins     Int      @default(0)
+  gameCoins     Int      @default(0)
+  diamonds      Int      @default(0)
+  promoDiamonds Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("wallets")
+}
+
+model Transaction {
+  id              String            @id @default(uuid()) @db.Uuid
+  idempotencyKey  String?           @unique
+  type            TransactionType
+  senderId        String?           @db.Uuid
+  receiverId      String?           @db.Uuid
+  coinAmount      Int               @default(0)
+  diamondAmount   Int               @default(0)
+  status          TransactionStatus @default(PENDING)
+  metadata        Json?
+  description     String?
+  createdAt       DateTime          @default(now())
+
+  sender   User? @relation("SenderTransactions", fields: [senderId], references: [id])
+  receiver User? @relation("ReceiverTransactions", fields: [receiverId], references: [id])
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("transactions")
+}
+
+// ============================================
+// CHAT
+// ============================================
+
+model Chat {
+  id        String   @id @default(uuid()) @db.Uuid
+  user1Id   String   @db.Uuid
+  user2Id   String   @db.Uuid
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user1    User      @relation("ChatUser1", fields: [user1Id], references: [id])
+  user2    User      @relation("ChatUser2", fields: [user2Id], references: [id])
+  messages Message[]
+
+  @@unique([user1Id, user2Id])
+  @@index([user1Id])
+  @@index([user2Id])
+  @@index([createdAt])
+  @@map("chats")
+}
+
+model Message {
+  id               String      @id @default(uuid()) @db.Uuid
+  chatId           String      @db.Uuid
+  senderId         String      @db.Uuid
+  content          String
+  messageType      MessageType @default(TEXT)
+  mediaUrl         String?
+  coinCost         Int         @default(0)
+  diamondGenerated Int         @default(0)
+  createdAt        DateTime    @default(now())
+
+  chat   Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender User @relation("SenderMessages", fields: [senderId], references: [id])
+
+  @@index([chatId])
+  @@index([senderId])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+model ChatSession {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  chatId    String   @db.Uuid
+  socketId  String
+  isActive  Boolean  @default(true)
+  joinedAt  DateTime @default(now())
+  leftAt    DateTime?
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([chatId])
+  @@index([socketId])
+  @@map("chat_sessions")
+}
+
+// ============================================
+// REFERRAL
+// ============================================
+
+model Referral {
+  id              String   @id @default(uuid()) @db.Uuid
+  referrerId      String   @db.Uuid
+  referredId      String   @unique @db.Uuid
+  registrationRewardGiven Boolean @default(false)
+  firstChatRewardGiven    Boolean @default(false)
+  createdAt       DateTime @default(now())
+
+  referrer User @relation("ReferrerRelation", fields: [referrerId], references: [id])
+  referred User @relation("ReferredRelation", fields: [referredId], references: [id])
+
+  @@index([referrerId])
+  @@index([referredId])
+  @@map("referrals")
+}
+
+// ============================================
+// FRAUD DETECTION
+// ============================================
+
+model FraudFlag {
+  id               String        @id @default(uuid()) @db.Uuid
+  userId           String        @db.Uuid
+  type             FraudFlagType
+  description      String
+  metadata         Json?
+  ipAddress        String?
+  deviceFingerprint String?
+  resolved         Boolean       @default(false)
+  createdAt        DateTime      @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("fraud_flags")
+}
+
+// ============================================
+// FOLLOW (enables free chat for followers)
+// ============================================
+
+model Follow {
+  id         String   @id @default(uuid()) @db.Uuid
+  followerId String   @db.Uuid
+  followeeId String   @db.Uuid
+  createdAt  DateTime @default(now())
+
+  follower User @relation("FollowerRelation", fields: [followerId], references: [id])
+  followee User @relation("FolloweeRelation", fields: [followeeId], references: [id])
+
+  @@unique([followerId, followeeId])
+  @@index([followerId])
+  @@index([followeeId])
+  @@map("follows")
+}
+
+// ============================================
+// WITHDRAWAL REQUESTS
+// ============================================
+
+model WithdrawalRequest {
+  id            String           @id @default(uuid()) @db.Uuid
+  userId        String           @db.Uuid
+  diamondAmount Int
+  status        WithdrawalStatus @default(PENDING)
+  adminNote     String?
+  processedAt   DateTime?
+  processedBy   String?          @db.Uuid
+  createdAt     DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("withdrawal_requests")
+}
+
+// ============================================
+// AGENCY
+// ============================================
+
+enum AgencyLevel {
+  D
+  C
+  B
+  A
+  S
+}
+
+enum HostLevel {
+  NONE
+  F
+  E
+  D
+  C
+  B
+  A
+  S
+  SS
+}
+
+enum SuperstarTag {
+  TALENT
+  H
+  G
+  F
+  E
+  D
+  C
+  B
+  A
+  S
+  SS
+}
+
+model Agency {
+  id                String      @id @default(uuid()) @db.Uuid
+  ownerId           String      @unique @db.Uuid
+  parentAgencyId    String?     @db.Uuid
+  name              String
+  level             AgencyLevel @default(D)
+  rollingDiamonds30d Int        @default(0)
+  lastRollingUpdate DateTime?
+  isBanned          Boolean     @default(false)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  owner           User        @relation("AgencyOwner", fields: [ownerId], references: [id])
+  parentAgency    Agency?     @relation("SubAgencies", fields: [parentAgencyId], references: [id])
+  subAgencies     Agency[]    @relation("SubAgencies")
+  hosts           HostProfile[]
+  commissionLogs  AgencyCommissionLog[]
+
+  @@index([ownerId])
+  @@index([parentAgencyId])
+  @@index([level])
+  @@map("agencies")
+}
+
+model AgencyCommissionLog {
+  id                    String   @id @default(uuid()) @db.Uuid
+  agencyId              String   @db.Uuid
+  originalTransactionId String   @db.Uuid    // links to the originating CHAT_PAYMENT Transaction.id
+  sourceAgencyId        String?  @db.Uuid    // null = own host, set = from sub-agency
+  hostId                String?  @db.Uuid
+  giftDiamonds          Int      @default(0) // gift amount that triggered this commission
+  commissionRate        Float                // agency's own rate at the time
+  subAgencyRate         Float    @default(0) // sub-agency's rate (0 if own host)
+  effectiveRate         Float                // commissionRate - subAgencyRate
+  diamondsEarned        Int      @default(0) // actual commission diamonds credited
+  isReversal            Boolean  @default(false)
+  createdAt             DateTime @default(now())
+
+  agency Agency @relation(fields: [agencyId], references: [id])
+
+  @@unique([agencyId, originalTransactionId, isReversal])
+  @@index([agencyId])
+  @@index([originalTransactionId])
+  @@index([sourceAgencyId])
+  @@index([createdAt])
+  @@map("agency_commission_logs")
+}
+
+// ============================================
+// HOST PROFILE & REWARDS
+// ============================================
+
+model HostProfile {
+  id                String     @id @default(uuid()) @db.Uuid
+  userId            String     @unique @db.Uuid
+  agencyId          String?    @db.Uuid
+  hostLevel         HostLevel  @default(NONE)
+  gender            String?    // 'M' or 'F'
+  isSuperstar       Boolean    @default(false)
+  superstarTag      SuperstarTag?
+  registeredAsHostAt DateTime  @default(now())
+  isBanned          Boolean    @default(false)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  user              User       @relation(fields: [userId], references: [id])
+  agency            Agency?    @relation(fields: [agencyId], references: [id])
+  dailyStats        HostDailyStat[]
+  weeklyStats       HostWeeklyStat[]
+  superstarRecords  SuperstarRecord[]
+  rewardClaims      HostRewardClaim[]
+
+  @@index([userId])
+  @@index([agencyId])
+  @@index([hostLevel])
+  @@map("host_profiles")
+}
+
+model HostDailyStat {
+  id              String   @id @default(uuid()) @db.Uuid
+  hostProfileId   String   @db.Uuid
+  date            DateTime @db.Date
+  diamondsReceived Int     @default(0) // from gifts (Live, Party, Chat) - excludes platform rewards
+  liveMinutes     Int      @default(0) // accumulated live minutes
+  bonusClaimed    Boolean  @default(false)
+  bonusDiamonds   Int      @default(0)
+  salaryClaimed   Boolean  @default(false)
+  salaryDiamonds  Int      @default(0)
+  newHostRewardClaimed Boolean @default(false)
+  newHostRewardDiamonds Int @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  hostProfile HostProfile @relation(fields: [hostProfileId], references: [id])
+
+  @@unique([hostProfileId, date])
+  @@index([hostProfileId])
+  @@index([date])
+  @@map("host_daily_stats")
+}
+
+model HostWeeklyStat {
+  id               String   @id @default(uuid()) @db.Uuid
+  hostProfileId    String   @db.Uuid
+  weekStart        DateTime @db.Date  // Monday of the week
+  diamondsReceived Int      @default(0)
+  totalLiveMinutes Int      @default(0)
+  bonusClaimed     Boolean  @default(false)
+  bonusDiamonds    Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  hostProfile HostProfile @relation(fields: [hostProfileId], references: [id])
+
+  @@unique([hostProfileId, weekStart])
+  @@index([hostProfileId])
+  @@index([weekStart])
+  @@map("host_weekly_stats")
+}
+
+model SuperstarRecord {
+  id              String       @id @default(uuid()) @db.Uuid
+  hostProfileId   String       @db.Uuid
+  tag             SuperstarTag
+  month           DateTime     @db.Date  // 1st of the month
+  timeTargetHours Int          @default(30)
+  diamondTarget   Int
+  totalLiveHours  Float        @default(0)
+  totalDiamonds   Int          @default(0)
+  targetMet       Boolean      @default(false)
+  fixedSalaryPaid Boolean      @default(false)
+  extraBonusUsd   Float        @default(0)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  hostProfile HostProfile @relation(fields: [hostProfileId], references: [id])
+
+  @@unique([hostProfileId, month])
+  @@index([hostProfileId])
+  @@index([month])
+  @@map("superstar_records")
+}
+
+model HostRewardClaim {
+  id              String   @id @default(uuid()) @db.Uuid
+  hostProfileId   String   @db.Uuid
+  rewardType      String   // 'DAILY_SALARY', 'LIVE_BONUS', 'NEW_HOST', 'ORDINARY', 'WEEKLY_BONUS', 'SUPERSTAR'
+  diamondsAwarded Int      @default(0)
+  date            DateTime @db.Date
+  metadata        Json?
+  createdAt       DateTime @default(now())
+
+  hostProfile HostProfile @relation(fields: [hostProfileId], references: [id])
+
+  @@index([hostProfileId])
+  @@index([rewardType])
+  @@index([date])
+  @@map("host_reward_claims")
+}
+
+// ============================================
+// INTIMACY (relationship level between user pairs)
+// ============================================
+
+model Intimacy {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  hostId    String   @db.Uuid
+  points    Int      @default(0)
+  level     Int      @default(1)
+  lastMessageAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation("UserIntimacy", fields: [userId], references: [id])
+  host User @relation("HostIntimacy", fields: [hostId], references: [id])
+
+  @@unique([userId, hostId])
+  @@index([userId])
+  @@index([hostId])
+  @@index([level])
+  @@map("intimacies")
+}
+
+// ============================================
+// SYSTEM SETTINGS (owner-controlled config)
+// ============================================
+
+model SystemSettings {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       String   @unique
+  value     String
+  updatedBy String?  @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("system_settings")
+}

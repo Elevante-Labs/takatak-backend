@@ -1,0 +1,10 @@
+dist/
+node_modules/
+.env
+.env.production
+*.js.map
+*.d.ts
+coverage/
+.idea/
+.vscode/
+*.log

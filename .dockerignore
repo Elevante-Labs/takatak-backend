@@ -1,0 +1,14 @@
+node_modules
+dist
+.env
+.env.production
+.git
+.gitignore
+*.md
+.vscode
+coverage
+.nyc_output
+*.log
+docker-compose*.yml
+Dockerfile
+.dockerignore

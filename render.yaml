@@ -1,0 +1,83 @@
+services:
+  # ─── Web Service (NestJS Backend) ───────────
+  - type: web
+    name: takatak-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    region: singapore
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      # Application
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: API_PREFIX
+        value: api/v1
+
+      # Database (Neon PostgreSQL - external)
+      - key: DATABASE_URL
+        sync: false
+
+      # Redis (Upstash)
+      - key: REDIS_HOST
+        sync: false
+      - key: REDIS_PORT
+        value: 6379
+      - key: REDIS_PASSWORD
+        sync: false
+      - key: REDIS_TLS
+        value: "true"
+
+      # JWT Secrets (set in Render dashboard)
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_EXPIRATION
+        value: 15m
+      - key: JWT_REFRESH_EXPIRATION
+        value: 7d
+
+      # OTP
+      - key: OTP_EXPIRATION_MINUTES
+        value: 5
+      - key: OTP_MOCK_CODE
+        value: 123456
+
+      # Wallet
+      - key: COIN_TO_DIAMOND_RATIO
+        value: 1
+      - key: MESSAGE_COIN_COST
+        value: 10
+
+      # Rate Limiting
+      - key: THROTTLE_TTL
+        value: 60000
+      - key: THROTTLE_LIMIT
+        value: 100
+
+      # Referral
+      - key: REFERRAL_REWARD_COINS
+        value: 50
+      - key: REFERRAL_FIRST_CHAT_REWARD
+        value: 25
+
+      # VIP
+      - key: VIP_DISCOUNT_PERCENT
+        value: 20
+
+      # Fraud
+      - key: MAX_MESSAGES_PER_MINUTE
+        value: 30
+      - key: MAX_ACCOUNTS_PER_DEVICE
+        value: 2
+
+      # Cloudinary (set in Render dashboard)
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
