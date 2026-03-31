@@ -71,14 +71,19 @@ enum MessageType {
 
 model User {
   id                String    @id @default(uuid()) @db.Uuid
-  phone             String    @unique
+  email             String?   @unique
+  phone             String?   @unique
+  passwordHash      String?
   username          String?   @unique
+  name              String?
+  avatarUrl         String?
   role              Role      @default(USER)
   vipLevel          Int       @default(0)
   vipExpiry         DateTime?
   country           String?
   isVerified        Boolean   @default(false)
-  deviceFingerprint String?
+  isEmailVerified   Boolean   @default(false)
+  isBlocked         Boolean   @default(false)
   lastLoginIp       String?
   isActive          Boolean   @default(true)
   deletedAt         DateTime? // Soft delete
@@ -88,6 +93,11 @@ model User {
   // Relations
   wallet           Wallet?
   otps             Otp[]
+  authProviders    AuthProvider[]
+  sessions         Session[]
+  devices          UserDevice[]
+  ipLogs           UserIP[]
+  rewards          UserReward[]
   sentMessages     Message[]      @relation("SenderMessages")
   chatsAsUser1     Chat[]         @relation("ChatUser1")
   chatsAsUser2     Chat[]         @relation("ChatUser2")
@@ -106,9 +116,47 @@ model User {
   intimaciesAsUserB Intimacy[]    @relation("HostIntimacy")
 
   @@index([phone])
-  @@index([deviceFingerprint])
+  @@index([email])
   @@index([createdAt])
   @@map("users")
+}
+
+// ============================================
+// AUTH PROVIDER (multi-provider linking)
+// ============================================
+
+model AuthProvider {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  provider   String   // "google", "email", "phone"
+  providerId String   // Google sub ID / phone / email
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerId])
+  @@index([userId])
+  @@map("auth_providers")
+}
+
+// ============================================
+// SESSION (DB-backed refresh tokens)
+// ============================================
+
+model Session {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  refreshToken String   @unique
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
 }
 
 // ============================================
@@ -119,7 +167,7 @@ model Otp {
   id        String   @id @default(uuid()) @db.Uuid
   userId    String?  @db.Uuid
   phone     String
-  code      String
+  codeHash  String
   expiresAt DateTime
   verified  Boolean  @default(false)
   attempts  Int      @default(0)
@@ -127,9 +175,73 @@ model Otp {
 
   user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([phone, code])
+  @@index([phone])
   @@index([expiresAt])
   @@map("otps")
+}
+
+// ============================================
+// USER DEVICE (device fingerprint tracking)
+// ============================================
+
+model UserDevice {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String   @db.Uuid
+  deviceFingerprint String
+  firstSeenAt       DateTime @default(now())
+  lastSeenAt        DateTime @default(now())
+  isTrusted         Boolean  @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceFingerprint])
+  @@index([deviceFingerprint])
+  @@map("user_devices")
+}
+
+// ============================================
+// USER IP (IP address logging)
+// ============================================
+
+model UserIP {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  ipAddress String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([ipAddress])
+  @@map("user_ips")
+}
+
+// ============================================
+// USER REWARD (signup bonus abuse prevention)
+// ============================================
+
+enum RewardType {
+  SIGNUP_BONUS
+  REFERRAL_BONUS
+  FIRST_LOGIN_BONUS
+}
+
+model UserReward {
+  id                String     @id @default(uuid()) @db.Uuid
+  userId            String     @db.Uuid
+  rewardType        RewardType
+  isGranted         Boolean    @default(false)
+  grantedAt         DateTime?
+  deviceFingerprint String?
+  phone             String?
+  ipAddress         String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([deviceFingerprint])
+  @@index([phone])
+  @@map("user_rewards")
 }
 
 // ============================================

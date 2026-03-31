@@ -339,7 +339,7 @@ export class UsersService {
   }
 
   private sanitizeUser(user: any) {
-    const { deviceFingerprint, lastLoginIp, deletedAt, ...sanitized } = user;
+    const { lastLoginIp, deletedAt, ...sanitized } = user;
     return sanitized;
   }
 }

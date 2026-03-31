@@ -104,21 +104,22 @@ export class FraudService {
 
     const maxAccounts = this.configService.get<number>('fraud.maxAccountsPerDevice') || 2;
 
-    const otherAccounts = await this.prisma.user.findMany({
+    // Find other users who share this device via UserDevice table
+    const devicesWithFingerprint = await this.prisma.userDevice.findMany({
       where: {
         deviceFingerprint,
-        id: { not: currentUserId },
-        deletedAt: null,
+        userId: { not: currentUserId },
       },
-      select: { id: true },
+      select: { userId: true },
+      distinct: ['userId'],
     });
 
-    const otherAccountIds = otherAccounts.map((a) => a.id);
+    const otherAccountIds = devicesWithFingerprint.map((d) => d.userId);
 
-    if (otherAccounts.length >= maxAccounts) {
+    if (otherAccountIds.length >= maxAccounts) {
       await this.flagSuspiciousActivity(currentUserId, {
         type: 'MULTI_ACCOUNT',
-        description: `Device fingerprint ${deviceFingerprint} has ${otherAccounts.length + 1} accounts (max: ${maxAccounts})`,
+        description: `Device fingerprint ${deviceFingerprint} has ${otherAccountIds.length + 1} accounts (max: ${maxAccounts})`,
         deviceFingerprint,
         metadata: { otherAccountIds },
       });
@@ -135,28 +136,29 @@ export class FraudService {
     user1Id: string,
     user2Id: string,
   ): Promise<boolean> {
-    const [user1, user2] = await Promise.all([
-      this.prisma.user.findUnique({
-        where: { id: user1Id },
-        select: { deviceFingerprint: true },
-      }),
-      this.prisma.user.findUnique({
-        where: { id: user2Id },
-        select: { deviceFingerprint: true },
-      }),
-    ]);
+    // Check if user1 and user2 share any device fingerprint via UserDevice table
+    const user1Devices = await this.prisma.userDevice.findMany({
+      where: { userId: user1Id },
+      select: { deviceFingerprint: true },
+    });
+    const user1Fingerprints = user1Devices.map((d) => d.deviceFingerprint);
 
-    if (
-      user1?.deviceFingerprint &&
-      user2?.deviceFingerprint &&
-      user1.deviceFingerprint === user2.deviceFingerprint
-    ) {
-      await this.flagSuspiciousActivity(user1Id, {
-        type: 'SELF_CHAT',
-        description: 'Same device fingerprint on both chat participants',
-        metadata: { otherUserId: user2Id },
+    if (user1Fingerprints.length > 0) {
+      const sharedDevice = await this.prisma.userDevice.findFirst({
+        where: {
+          userId: user2Id,
+          deviceFingerprint: { in: user1Fingerprints },
+        },
       });
-      return true;
+
+      if (sharedDevice) {
+        await this.flagSuspiciousActivity(user1Id, {
+          type: 'SELF_CHAT',
+          description: 'Same device fingerprint on both chat participants',
+          metadata: { otherUserId: user2Id },
+        });
+        return true;
+      }
     }
 
     return false;

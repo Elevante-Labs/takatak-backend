@@ -23,7 +23,21 @@ export default () => ({
 
   otp: {
     expirationMinutes: parseInt(process.env.OTP_EXPIRATION_MINUTES || '5', 10),
+    maxAttempts: parseInt(process.env.OTP_MAX_ATTEMPTS || '5', 10),
     mockCode: process.env.OTP_MOCK_CODE || null,
+  },
+
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID || '',
+  },
+
+  sms: {
+    provider: process.env.SMS_PROVIDER || 'mock', // 'mock' | 'twilio' | 'msg91'
+    twilio: {
+      accountSid: process.env.TWILIO_ACCOUNT_SID || '',
+      authToken: process.env.TWILIO_AUTH_TOKEN || '',
+      fromNumber: process.env.TWILIO_FROM_NUMBER || '',
+    },
   },
 
   wallet: {

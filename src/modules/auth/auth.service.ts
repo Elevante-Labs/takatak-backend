@@ -49,7 +49,7 @@ export class AuthService {
     await this.prisma.otp.create({
       data: {
         phone: dto.phone,
-        code: otpCode,
+        codeHash: otpCode,
         expiresAt,
         userId: user?.id,
       },
@@ -76,7 +76,7 @@ export class AuthService {
     const otp = await this.prisma.otp.findFirst({
       where: {
         phone: dto.phone,
-        code: dto.code,
+        codeHash: dto.code,
         verified: false,
         expiresAt: { gt: new Date() },
       },
@@ -107,11 +107,12 @@ export class AuthService {
       // Check device fingerprint fraud
       if (dto.deviceFingerprint) {
         const maxAccounts = this.configService.get<number>('fraud.maxAccountsPerDevice') || 2;
-        const existingAccounts = await this.prisma.user.count({
+        const existingDevices = await this.prisma.userDevice.groupBy({
+          by: ['userId'],
           where: { deviceFingerprint: dto.deviceFingerprint },
         });
 
-        if (existingAccounts >= maxAccounts) {
+        if (existingDevices.length >= maxAccounts) {
           this.logger.warn(
             `Device fingerprint ${dto.deviceFingerprint} exceeded max accounts (${maxAccounts})`,
           );
@@ -123,7 +124,6 @@ export class AuthService {
         data: {
           phone: dto.phone,
           isVerified: true,
-          deviceFingerprint: dto.deviceFingerprint,
           lastLoginIp: ip,
           wallet: {
             create: {
@@ -141,13 +141,12 @@ export class AuthService {
         data: {
           isVerified: true,
           lastLoginIp: ip,
-          ...(dto.deviceFingerprint && { deviceFingerprint: dto.deviceFingerprint }),
         },
       });
     }
 
     // Generate tokens
-    const tokens = await this.generateTokens(user.id, user.phone, user.role);
+    const tokens = await this.generateTokens(user.id, user.phone || '', user.role);
 
     return {
       ...tokens,
@@ -191,7 +190,7 @@ export class AuthService {
       // Blacklist old refresh token
       await this.redis.set(`blacklist:${dto.refreshToken}`, '1', 7 * 24 * 60 * 60);
 
-      return this.generateTokens(user.id, user.phone, user.role);
+      return this.generateTokens(user.id, user.phone || '', user.role);
     } catch (error) {
       if (error instanceof UnauthorizedException) throw error;
       this.logger.warn(`[Refresh] JWT verify failed: ${(error as Error).message}`);

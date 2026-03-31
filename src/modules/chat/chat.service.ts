@@ -191,7 +191,6 @@ export class ChatService {
             id: true,
             role: true,
             vipLevel: true,
-            deviceFingerprint: true,
           },
         },
         user2: {
@@ -199,7 +198,6 @@ export class ChatService {
             id: true,
             role: true,
             vipLevel: true,
-            deviceFingerprint: true,
           },
         },
       },
@@ -216,18 +214,28 @@ export class ChatService {
     const sender = chat.user1Id === senderId ? chat.user1 : chat.user2;
     const receiver = chat.user1Id === senderId ? chat.user2 : chat.user1;
 
-    // ── 3. Fraud: self-chat detection ──
-    if (
-      sender.deviceFingerprint &&
-      receiver.deviceFingerprint &&
-      sender.deviceFingerprint === receiver.deviceFingerprint
-    ) {
+    // ── 3. Fraud: self-chat detection via shared device fingerprints ──
+    const sharedDevices = await this.prisma.userDevice.findMany({
+      where: {
+        userId: sender.id,
+        deviceFingerprint: {
+          in: (
+            await this.prisma.userDevice.findMany({
+              where: { userId: receiver.id },
+              select: { deviceFingerprint: true },
+            })
+          ).map((d) => d.deviceFingerprint),
+        },
+      },
+    });
+
+    if (sharedDevices.length > 0) {
       await this.fraudService.flagSuspiciousActivity(senderId, {
         type: 'SELF_CHAT',
         description:
           'Same device fingerprint detected on both chat participants',
         chatId,
-        deviceFingerprint: sender.deviceFingerprint,
+        deviceFingerprint: sharedDevices[0]?.deviceFingerprint,
       });
       throw new BadRequestException('Suspicious activity detected');
     }

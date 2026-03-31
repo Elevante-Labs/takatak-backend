@@ -49,12 +49,17 @@ export class ReferralService {
       throw new BadRequestException('Cannot refer yourself');
     }
 
-    // Device fingerprint abuse prevention
-    if (deviceFingerprint && referrer.deviceFingerprint === deviceFingerprint) {
-      this.logger.warn(
-        `Referral abuse detected: same device fingerprint ${deviceFingerprint}`,
-      );
-      throw new BadRequestException('Referral abuse detected');
+    // Device fingerprint abuse prevention via UserDevice table
+    if (deviceFingerprint) {
+      const sharedDevice = await this.prisma.userDevice.findUnique({
+        where: { userId_deviceFingerprint: { userId: referrer.id, deviceFingerprint } },
+      });
+      if (sharedDevice) {
+        this.logger.warn(
+          `Referral abuse detected: same device fingerprint ${deviceFingerprint}`,
+        );
+        throw new BadRequestException('Referral abuse detected');
+      }
     }
 
     // Check if referral already exists
