@@ -36,13 +36,14 @@ export class IntimacyService {
    * Get or create the intimacy record for a user-host pair.
    */
   async getIntimacy(userId: string, hostId: string) {
+    const [userAId, userBId] = userId < hostId ? [userId, hostId] : [hostId, userId];
     let intimacy = await this.prisma.intimacy.findUnique({
-      where: { userId_hostId: { userId, hostId } },
+      where: { userAId_userBId: { userAId, userBId } },
     });
 
     if (!intimacy) {
       intimacy = await this.prisma.intimacy.create({
-        data: { userId, hostId, points: 0, level: 1 },
+        data: { userAId, userBId, intimacyScore: 0, level: 1 },
       });
     }
 
@@ -56,7 +57,7 @@ export class IntimacyService {
   async onMessageSent(userId: string, hostId: string) {
     const intimacy = await this.getIntimacy(userId, hostId);
     const now = new Date();
-    const lastMsg = intimacy.lastMessageAt;
+    const lastMsg = intimacy.lastInteractionAt;
 
     let pointDelta = 0;
 
@@ -85,15 +86,15 @@ export class IntimacyService {
       }
     }
 
-    const newPoints = Math.max(0, Math.min(100, intimacy.points + pointDelta));
+    const newPoints = Math.max(0, Math.min(100, intimacy.intimacyScore + pointDelta));
     const newLevel = this.calculateLevel(newPoints);
 
     const updated = await this.prisma.intimacy.update({
       where: { id: intimacy.id },
       data: {
-        points: newPoints,
+        intimacyScore: newPoints,
         level: newLevel,
-        lastMessageAt: now,
+        lastInteractionAt: now,
       },
     });
 
@@ -109,16 +110,16 @@ export class IntimacyService {
   /**
    * Compute display info from an existing intimacy record (avoids extra DB query).
    */
-  getDisplayInfo(record: { level: number; points: number }) {
+  getDisplayInfo(record: { level: number; intimacyScore: number }) {
     const nextLevel = LEVEL_THRESHOLDS.find((t) => t.level === record.level + 1);
     const currentMin = LEVEL_THRESHOLDS.find((t) => t.level === record.level)?.minPoints ?? 0;
     return {
       level: record.level,
-      points: record.points,
+      points: record.intimacyScore,
       nextLevelAt: nextLevel?.minPoints ?? null,
       progressPercent: nextLevel
         ? Math.round(
-            ((record.points - currentMin) / (nextLevel.minPoints - currentMin)) * 100,
+            ((record.intimacyScore - currentMin) / (nextLevel.minPoints - currentMin)) * 100,
           )
         : 100,
     };
@@ -143,11 +144,11 @@ export class IntimacyService {
 
     return {
       level: intimacy.level,
-      points: intimacy.points,
+      points: intimacy.intimacyScore,
       nextLevelAt: nextLevel?.minPoints ?? null,
       progressPercent: nextLevel
         ? Math.round(
-            ((intimacy.points - (LEVEL_THRESHOLDS.find((t) => t.level === intimacy.level)?.minPoints ?? 0)) /
+            ((intimacy.intimacyScore - (LEVEL_THRESHOLDS.find((t) => t.level === intimacy.level)?.minPoints ?? 0)) /
               (nextLevel.minPoints - (LEVEL_THRESHOLDS.find((t) => t.level === intimacy.level)?.minPoints ?? 0))) *
               100,
           )
