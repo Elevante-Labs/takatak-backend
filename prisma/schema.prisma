@@ -542,6 +542,108 @@ model Intimacy {
 }
 
 // ============================================
+// GIFTS (Production-Ready Dynamic System)
+// ============================================
+
+enum GiftCategory {
+  BASIC
+  PREMIUM
+  EVENT
+  VIP
+  SPONSORED
+}
+
+enum GiftRarity {
+  COMMON
+  RARE
+  EPIC
+  LEGENDARY
+}
+
+model Gift {
+  id                String        @id @default(uuid()) @db.Uuid
+  name              String        @unique
+  description       String?
+  iconUrl           String
+  animationUrl      String?
+  animationUrl_full String?       // Full-screen animation for premium gifts
+  coinCost          Int           // Variable pricing: 10-10000
+  diamondValue      Int           // Diamonds generated for receiver
+  category          GiftCategory  @default(BASIC)
+  rarity            GiftRarity    @default(COMMON)
+  displayOrder      Int           @default(0) // For UI ordering
+  
+  // Limited-time availability
+  isActive          Boolean       @default(true)
+  isLimited         Boolean       @default(false)
+  availableFrom     DateTime?
+  availableTill     DateTime?
+  
+  // VIP exclusivity
+  minVipLevel       Int           @default(0) // 0 = available to all
+  
+  // Monetization metadata
+  comboMultiplier   Float         @default(1.0) // e.g., 1.5x for 5+ gifts in streak
+  eventTag          String?       // e.g., "valentine", "lunar-new-year"
+  metadata          Json?         // Extensible storage
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  // Relations
+  analytics         GiftAnalytics?
+
+  @@index([isActive])
+  @@index([category])
+  @@index([rarity])
+  @@index([availableTill])
+  @@index([createdAt])
+  @@map("gifts")
+}
+
+model GiftAnalytics {
+  id              String   @id @default(uuid()) @db.Uuid
+  giftId          String   @unique @db.Uuid
+  totalSent       Int      @default(0)  // Total gifts sent (all-time)
+  totalDiamondsEarned Int @default(0) // Total diamonds generated
+  uniqueSenders   Int      @default(0)  // Distinct users who sent this gift
+  uniqueReceivers Int      @default(0)  // Distinct users who received this gift
+  lastSentAt      DateTime?
+  popularityScore Float   @default(0.0) // Calculated daily (sends / day)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  gift Gift @relation(fields: [giftId], references: [id], onDelete: Cascade)
+
+  @@index([giftId])
+  @@index([totalSent])
+  @@index([popularityScore])
+  @@map("gift_analytics")
+}
+
+// Gift transaction metadata tracking
+model GiftTransaction {
+  id              String   @id @default(uuid()) @db.Uuid
+  transactionId   String   @unique @db.Uuid // Links to Transaction.id
+  giftId          String   @db.Uuid
+  senderId        String   @db.Uuid
+  receiverId      String   @db.Uuid
+  coinCost        Int
+  diamondValue    Int
+  comboCount      Int      @default(1)   // How many in sequence (for combo animations)
+  appliedMultiplier Float  @default(1.0) // Actual multiplier applied
+  
+  createdAt       DateTime @default(now())
+
+  @@index([giftId])
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([createdAt])
+  @@map("gift_transactions")
+}
+
+// ============================================
 // SYSTEM SETTINGS (owner-controlled config)
 // ============================================
 

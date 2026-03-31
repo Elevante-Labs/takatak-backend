@@ -313,11 +313,16 @@ export class ChatGateway
     }
 
     try {
+      // Get user's VIP level for gift validation
+      const user = await this.chatService.getUserVipLevel(client.user.sub);
+      const userVipLevel = user?.vipLevel ?? 0;
+
       const result = await this.giftService.sendGift(
         client.user.sub,
         data.chatId,
         data.giftId,
         data.idempotencyKey,
+        userVipLevel,
       );
 
       // Broadcast gift message to room (excluding sender)
@@ -335,7 +340,8 @@ export class ChatGateway
         messageType: 'GIFT',
         giftId: result.message.giftId,
         giftName: result.message.giftName,
-        giftEmoji: result.message.giftEmoji,
+        giftIcon: result.message.giftIcon,
+        giftAnimation: result.message.giftAnimation,
       });
 
       // Payment confirmation to sender
@@ -354,13 +360,21 @@ export class ChatGateway
           });
       }
 
-      // Gift received animation event to host
+      // Gift received animation event to host (send full gift object for animations)
       this.server
         .to(`user:${result.otherUserId}`)
         .emit('giftReceived', {
           chatId: data.chatId,
           senderId: client.user.sub,
-          gift: result.gift,
+          gift: {
+            id: result.gift.id,
+            name: result.gift.name,
+            icon: result.gift.iconUrl,
+            animation: result.gift.animationUrl,
+            animation_full: result.gift.animationUrl_full,
+            rarity: result.gift.rarity,
+            diamondValue: result.gift.diamondValue,
+          },
         });
 
       // New chat notification

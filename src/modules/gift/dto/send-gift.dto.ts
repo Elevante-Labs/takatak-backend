@@ -4,9 +4,9 @@ export class SendGiftDto {
   @IsUUID()
   chatId!: string;
 
-  @IsString()
+  @IsUUID()
   @IsNotEmpty()
-  giftId!: string;
+  giftId!: string; // Changed to UUID to match DB schema
 
   @IsString()
   @IsNotEmpty()
