@@ -16,7 +16,9 @@ import { ConfigService } from '@nestjs/config';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { RedisService } from '../../database/redis.service';
 import { ChatService } from './chat.service';
+import { GiftService } from '../gift/gift.service';
 import { SendMessageDto } from './dto';
+import { SendGiftDto } from '../gift/dto/send-gift.dto';
 
 interface AuthenticatedSocket extends Socket {
   user: {
@@ -45,6 +47,7 @@ export class ChatGateway
 
   constructor(
     private readonly chatService: ChatService,
+    private readonly giftService: GiftService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly redis: RedisService,
@@ -292,6 +295,101 @@ export class ChatGateway
         `[WS] sendMessage failed: ${(err as Error).message}`
       );
 
+      client.emit('messageError', {
+        idempotencyKey: data.idempotencyKey,
+        error: (err as Error).message,
+      });
+    }
+  }
+
+  @SubscribeMessage('sendGift')
+  async handleSendGift(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data: SendGiftDto,
+  ) {
+    if (!client.user) {
+      client.emit('messageError', { error: 'Not authenticated' });
+      return;
+    }
+
+    try {
+      // Get user's VIP level for gift validation
+      const user = await this.chatService.getUserVipLevel(client.user.sub);
+      const userVipLevel = user?.vipLevel ?? 0;
+
+      const result = await this.giftService.sendGift(
+        client.user.sub,
+        data.chatId,
+        data.giftId,
+        data.idempotencyKey,
+        userVipLevel,
+      );
+
+      // Broadcast gift message to room (excluding sender)
+      client.to(`chat:${data.chatId}`).emit('newMessage', {
+        ...result.message,
+        idempotencyKey: data.idempotencyKey,
+      });
+
+      // Ack to sender
+      client.emit('messageAck', {
+        chatId: data.chatId,
+        idempotencyKey: data.idempotencyKey,
+        messageId: result.message.id,
+        createdAt: result.message.createdAt,
+        messageType: 'GIFT',
+        giftId: result.message.giftId,
+        giftName: result.message.giftName,
+        giftIcon: result.message.giftIcon,
+        giftAnimation: result.message.giftAnimation,
+      });
+
+      // Payment confirmation to sender
+      client.emit('paymentConfirmed', {
+        transactionId: result.transaction.transactionId,
+        coinDeducted: result.transaction.coinAmount,
+        senderCoins: result.senderBalance?.totalCoins ?? null,
+      });
+
+      // Wallet update to host
+      if (result.receiverBalance) {
+        this.server
+          .to(`user:${result.otherUserId}`)
+          .emit('walletUpdated', {
+            diamonds: result.receiverBalance.diamonds,
+          });
+      }
+
+      // Gift received animation event to host (send full gift object for animations)
+      this.server
+        .to(`user:${result.otherUserId}`)
+        .emit('giftReceived', {
+          chatId: data.chatId,
+          senderId: client.user.sub,
+          gift: {
+            id: result.gift.id,
+            name: result.gift.name,
+            icon: result.gift.iconUrl,
+            animation: result.gift.animationUrl,
+            animation_full: result.gift.animationUrl_full,
+            rarity: result.gift.rarity,
+            diamondValue: result.gift.diamondValue,
+          },
+        });
+
+      // New chat notification
+      this.server
+        .to(`user:${result.otherUserId}`)
+        .emit('newChatNotification', {
+          chatId: data.chatId,
+          senderId: client.user.sub,
+        });
+
+      this.logger.log(
+        `[WS] Gift ${result.gift.name} sent from ${client.user.sub} in chat ${data.chatId}`,
+      );
+    } catch (err) {
+      this.logger.error(`[WS] sendGift failed: ${(err as Error).message}`);
       client.emit('messageError', {
         idempotencyKey: data.idempotencyKey,
         error: (err as Error).message,

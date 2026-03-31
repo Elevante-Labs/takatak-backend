@@ -10,7 +10,6 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ChatService } from './chat.service';
-import { IntimacyService } from './intimacy.service';
 import { CreateChatDto } from './dto';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
 import { PaginationDto } from '../../common/dto/pagination.dto';
@@ -18,10 +17,7 @@ import { PaginationDto } from '../../common/dto/pagination.dto';
 @Controller('chat')
 @UseGuards(AuthGuard('jwt'))
 export class ChatController {
-  constructor(
-    private readonly chatService: ChatService,
-    private readonly intimacyService: IntimacyService,
-  ) {}
+  constructor(private readonly chatService: ChatService) {}
 
   @Post()
   async createChat(
@@ -53,16 +49,11 @@ export class ChatController {
     );
   }
 
-  /**
-   * Legacy intimacy endpoint — kept for backward compatibility.
-   * Delegates to the old IntimacyService (user→host pairs).
-   * New system uses GET /intimacy/:userId/:otherUserId.
-   */
   @Get('intimacy/:otherUserId')
   async getIntimacy(
     @CurrentUser() user: JwtPayload,
     @Param('otherUserId', ParseUUIDPipe) otherUserId: string,
   ) {
-    return this.intimacyService.getIntimacyInfo(user.sub, otherUserId);
+    return this.chatService.getIntimacyInfo(user.sub, user.role, otherUserId);
   }
 }

@@ -27,10 +27,13 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const redisConfig = {
+    const useTls = this.configService.get<boolean>('redis.tls');
+
+    const redisConfig: any = {
       host,
       port,
       password: this.configService.get<string>('redis.password') || undefined,
+      ...(useTls ? { tls: {} } : {}),
       enableOfflineQueue: false, // Prevents ioredis from hanging commands infinitely when disconnected
       maxRetriesPerRequest: 3,
       retryStrategy: (times: number) => {

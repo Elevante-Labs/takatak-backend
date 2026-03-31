@@ -21,6 +21,7 @@ enum Role {
 enum TransactionType {
   RECHARGE
   CHAT_PAYMENT
+  GIFT_PAYMENT
   REFERRAL_REWARD
   DAILY_BONUS
   PROMO
@@ -61,26 +62,7 @@ enum MessageType {
   TEXT
   IMAGE
   EMOJI
-}
-
-enum IntimacyActionType {
-  CHAT
   GIFT
-  CALL
-  ROOM
-}
-
-enum RelationshipType {
-  NONE
-  FRIEND
-  COUPLE
-}
-
-enum RelationshipStatus {
-  PENDING
-  ACTIVE
-  EXPIRED
-  REJECTED
 }
 
 // ============================================
@@ -120,8 +102,8 @@ model User {
   withdrawals      WithdrawalRequest[]
   agency           Agency?        @relation("AgencyOwner")
   hostProfile      HostProfile?
-  intimaciesAsUserA Intimacy[]    @relation("UserAIntimacy")
-  intimaciesAsUserB Intimacy[]    @relation("UserBIntimacy")
+  intimaciesAsUser Intimacy[]     @relation("UserIntimacy")
+  intimaciesAsHost Intimacy[]     @relation("HostIntimacy")
 
   @@index([phone])
   @@index([deviceFingerprint])
@@ -540,67 +522,125 @@ model HostRewardClaim {
 // ============================================
 
 model Intimacy {
-  id                String           @id @default(uuid()) @db.Uuid
-  userAId           String           @db.Uuid
-  userBId           String           @db.Uuid
-  intimacyScore     Int              @default(0)
-  level             Int              @default(0)
-  relationshipType  RelationshipType @default(NONE)
-  lastInteractionAt DateTime?
-  dailyChatRounds   Int              @default(0)
-  dailyChatDate     DateTime?        @db.Date
-  isActive          Boolean          @default(true)
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  hostId    String   @db.Uuid
+  points    Int      @default(0)
+  level     Int      @default(1)
+  lastMessageAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  userA        User            @relation("UserAIntimacy", fields: [userAId], references: [id])
-  userB        User            @relation("UserBIntimacy", fields: [userBId], references: [id])
-  logs         IntimacyLog[]
-  relationship Relationship?
+  user User @relation("UserIntimacy", fields: [userId], references: [id])
+  host User @relation("HostIntimacy", fields: [hostId], references: [id])
 
-  @@unique([userAId, userBId])
-  @@index([userAId])
-  @@index([userBId])
+  @@unique([userId, hostId])
+  @@index([userId])
+  @@index([hostId])
   @@index([level])
-  @@index([lastInteractionAt])
   @@map("intimacies")
 }
 
-model IntimacyLog {
-  id         String            @id @default(uuid()) @db.Uuid
-  intimacyId String            @db.Uuid
-  actionType IntimacyActionType
-  value      Int               @default(0)
-  metadata   Json?
-  createdAt  DateTime          @default(now())
+// ============================================
+// GIFTS (Production-Ready Dynamic System)
+// ============================================
 
-  intimacy Intimacy @relation(fields: [intimacyId], references: [id], onDelete: Cascade)
-
-  @@index([intimacyId])
-  @@index([actionType])
-  @@index([createdAt])
-  @@map("intimacy_logs")
+enum GiftCategory {
+  BASIC
+  PREMIUM
+  EVENT
+  VIP
+  SPONSORED
 }
 
-model Relationship {
-  id         String             @id @default(uuid()) @db.Uuid
-  intimacyId String             @unique @db.Uuid
-  type       RelationshipType
-  inviterId  String             @db.Uuid
-  inviteeId  String             @db.Uuid
-  status     RelationshipStatus @default(PENDING)
-  startedAt  DateTime?
-  expiresAt  DateTime?
-  createdAt  DateTime           @default(now())
-  updatedAt  DateTime           @updatedAt
+enum GiftRarity {
+  COMMON
+  RARE
+  EPIC
+  LEGENDARY
+}
 
-  intimacy Intimacy @relation(fields: [intimacyId], references: [id], onDelete: Cascade)
+model Gift {
+  id                String        @id @default(uuid()) @db.Uuid
+  name              String        @unique
+  description       String?
+  iconUrl           String
+  animationUrl      String?
+  animationUrl_full String?       // Full-screen animation for premium gifts
+  coinCost          Int           // Variable pricing: 10-10000
+  diamondValue      Int           // Diamonds generated for receiver
+  category          GiftCategory  @default(BASIC)
+  rarity            GiftRarity    @default(COMMON)
+  displayOrder      Int           @default(0) // For UI ordering
+  
+  // Limited-time availability
+  isActive          Boolean       @default(true)
+  isLimited         Boolean       @default(false)
+  availableFrom     DateTime?
+  availableTill     DateTime?
+  
+  // VIP exclusivity
+  minVipLevel       Int           @default(0) // 0 = available to all
+  
+  // Monetization metadata
+  comboMultiplier   Float         @default(1.0) // e.g., 1.5x for 5+ gifts in streak
+  eventTag          String?       // e.g., "valentine", "lunar-new-year"
+  metadata          Json?         // Extensible storage
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  // Relations
+  analytics         GiftAnalytics?
 
-  @@index([inviterId])
-  @@index([inviteeId])
-  @@index([status])
-  @@index([expiresAt])
-  @@map("relationships")
+  @@index([isActive])
+  @@index([category])
+  @@index([rarity])
+  @@index([availableTill])
+  @@index([createdAt])
+  @@map("gifts")
+}
+
+model GiftAnalytics {
+  id              String   @id @default(uuid()) @db.Uuid
+  giftId          String   @unique @db.Uuid
+  totalSent       Int      @default(0)  // Total gifts sent (all-time)
+  totalDiamondsEarned Int @default(0) // Total diamonds generated
+  uniqueSenders   Int      @default(0)  // Distinct users who sent this gift
+  uniqueReceivers Int      @default(0)  // Distinct users who received this gift
+  lastSentAt      DateTime?
+  popularityScore Float   @default(0.0) // Calculated daily (sends / day)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  gift Gift @relation(fields: [giftId], references: [id], onDelete: Cascade)
+
+  @@index([giftId])
+  @@index([totalSent])
+  @@index([popularityScore])
+  @@map("gift_analytics")
+}
+
+// Gift transaction metadata tracking
+model GiftTransaction {
+  id              String   @id @default(uuid()) @db.Uuid
+  transactionId   String   @unique @db.Uuid // Links to Transaction.id
+  giftId          String   @db.Uuid
+  senderId        String   @db.Uuid
+  receiverId      String   @db.Uuid
+  coinCost        Int
+  diamondValue    Int
+  comboCount      Int      @default(1)   // How many in sequence (for combo animations)
+  appliedMultiplier Float  @default(1.0) // Actual multiplier applied
+  
+  createdAt       DateTime @default(now())
+
+  @@index([giftId])
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([createdAt])
+  @@map("gift_transactions")
 }
 
 // ============================================

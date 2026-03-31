@@ -561,4 +561,14 @@ export class ChatService {
       return this.intimacyService.getIntimacyInfo(currentUserId, otherUserId);
     }
   }
+
+  /**
+   * Get user's VIP level for gift validation
+   */
+  async getUserVipLevel(userId: string): Promise<{ vipLevel: number } | null> {
+    return this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { vipLevel: true },
+    });
+  }
 }

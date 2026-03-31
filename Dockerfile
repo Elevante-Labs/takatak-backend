@@ -52,4 +52,5 @@ USER nestjs
 EXPOSE 3000
 
 # Use dumb-init to handle PID 1 and signals properly
-CMD ["dumb-init", "node", "dist/main.js"]
+# Prisma migrate deploy runs pending migrations before starting the app
+CMD ["dumb-init", "sh", "-c", "npx prisma migrate deploy && node dist/main.js"]
